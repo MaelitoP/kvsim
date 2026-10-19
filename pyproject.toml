@@ -1,0 +1,38 @@
+[project]
+name = "kv-cache-lab"
+version = "0.1.0"
+description = "Deterministic simulator of the scheduler and paged KV cache of an LLM inference engine"
+readme = "README.txt"
+license = "MIT"
+authors = [{ name = "Maël Le Petit" }]
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.16",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+bench = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+mypy_path = "tests"
