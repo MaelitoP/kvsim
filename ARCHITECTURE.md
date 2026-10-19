@@ -1,83 +1,91 @@
 # Architecture
 
-kv-cache-lab is a deterministic simulator of the scheduler and the paged KV-cache manager of an
-LLM inference engine, modelled on vLLM V1. It makes the memory and scheduling mechanisms of such
-an engine explicit and testable: a fixed pool of KV-cache blocks, per-request block tables, prefix
-caching by block hash, and a scheduler that spends one token budget on prefill and decode and
-preempts requests under memory pressure. There is no model execution, no GPU code and no tokenizer.
-The package has no runtime dependency.
+kv-cache-lab simulates the scheduler and paged KV-cache manager of an LLM inference engine, based on vLLM V1. It models block allocation, prefix caching, token budgets and preemption.
+
+The simulator is deterministic. It does not execute a model or require a GPU, tokenizer or runtime dependencies.
 
 ## Modules
 
-Target layout under `src/kv_cache_lab/`, in build order. A module is marked planned until it
-exists.
+Code lives in `src/kv_cache_lab/`. Only the block pool is implemented.
 
-| Module | Role | Status |
+| Module | Responsibility | Status |
 | --- | --- | --- |
-| `block_pool.py` | `KVCacheBlock`, `FreeBlockQueue`, `BlockPool`: the fixed pool of blocks, reference counts, the free queue in eviction order, block hashes and eviction | planned |
-| `requests.py` | `Request`, `RequestStatus`: one request's tokens, computed-token counter, lifecycle status and timeline | planned |
-| `kv_cache_manager.py` | `KVCacheManager`: per-request block tables on top of the pool, prefix-cache lookup on admission | planned |
-| `prefix_cache.py` | block hashing of full blocks with chained parent hashes | planned |
-| `scheduler.py` | `SchedulerConfig`, `SchedulerOutput`, `Scheduler`: one `schedule()` call per step, token budget, chunked prefill, preemption, abort | planned |
-| `workload.py` | deterministic request workloads generated from a JSON spec | planned |
-| `simulator.py` | step-by-step replay of a workload with an explicit cost model | planned |
-| `metrics.py` | per-request and aggregate metrics, result summary | planned |
-| `__main__.py` | CLI: `simulate`, `summarize` | planned |
+| `block_pool.py` | Fixed block pool, reference counts, free queue and cache eviction | Implemented |
+| `requests.py` | Request tokens, computed-token count, status and timeline | Planned |
+| `kv_cache_manager.py` | Per-request block tables and prefix-cache lookup on admission | Planned |
+| `prefix_cache.py` | Hashing full blocks with chained parent hashes | Planned |
+| `scheduler.py` | Token budget, chunked prefill, preemption and abort | Planned |
+| `workload.py` | Deterministic workloads from a JSON spec | Planned |
+| `simulator.py` | Workload replay and simulated time | Planned |
+| `metrics.py` | Per-request metrics and aggregate results | Planned |
+| `__main__.py` | `simulate` and `summarize` commands | Planned |
 
-Tests live in `tests/`, one module per source module, plus `tests/invariants.py`, which holds the
-shared `check_pool`, `check_manager` and `check_scheduler` helpers that every test calls after an
-operation, and `tests/test_stateful.py` for the hypothesis state machines.
+Tests live in `tests/`, with example tests and Hypothesis properties for each module. Shared helpers in `tests/invariants.py` check pool, manager and scheduler state after each operation. Scheduler state-machine tests will live in `tests/test_stateful.py`.
 
-## Invariants
+## Block pool
 
-These are the contract of the simulator. They hold after every public operation and each one maps
-to an assertion in `tests/invariants.py`.
+`BlockPool(num_blocks)` creates all blocks at initialization. Blocks are never added or removed.
+
+Each `KVCacheBlock` has a `block_id`, a `ref_cnt` and an optional `block_hash`. All blocks start with no hash and a reference count of zero, queued in `block_id` order.
+
+The free queue determines eviction order:
+
+- `get_new_blocks(n)` takes blocks from the head and sets their reference counts to 1. A negative count or insufficient free blocks raises before changing any state.
+- `free_blocks(blocks)` decrements reference counts. Blocks that reach zero go to the tail in the supplied order, so callers control their relative eviction order. Freeing a block already at zero raises.
+- `touch(blocks)` increments reference counts, removing blocks from the free queue when they go from zero to one. This lets a request reuse a cached prefix that has not been evicted.
+
+`FreeBlockQueue` uses an `OrderedDict` keyed by block ID for O(1) removal from the head, insertion at the tail and removal by ID.
+
+## Contracts
+
+These rules define the simulator's behavior. State invariants must hold after every public operation and are checked by the shared test helpers.
 
 ### Determinism
 
-The simulator never reads the wall clock and never uses unseeded randomness. The same workload
-spec, configuration and seed produce a byte-identical trace. Time inside the simulator is a step
-counter plus an estimated duration from an explicit cost model; both are reported and the estimate
-is always labelled as such.
+The simulator never reads the wall clock or uses unseeded randomness. The same workload spec, configuration and seed produce a byte-identical trace.
 
-### Memory model
+Simulated time consists of a step counter and an estimated duration from an explicit cost model. Both are reported, with durations labelled as estimates.
 
-The KV cache is a fixed pool of `num_blocks` blocks of `block_size` tokens. A request whose first
-`n` tokens are computed or scheduled needs exactly `ceil(n / block_size)` blocks. Block tables are
-append-only lists per request. There is one KV-cache type, full attention: no hybrid allocators,
-no sliding window, no multimodal inputs, no LoRA, no speculative decoding, no async scheduling.
+### Memory
 
-- Every block is in exactly one of two states: free (`ref_cnt == 0`, present in the free queue)
-  or allocated (`ref_cnt > 0`, absent from the free queue). The total number of blocks never
-  changes.
-- `ref_cnt` of a block equals the number of request block tables that contain it.
-- A block with a hash is present in the hash map under that hash and the map entry points to
-  that block; a block that is not in the map has no hash. A cached block may be free (reusable
-  until evicted) or allocated (shared).
-- A failed allocation has no side effects: no block touched, no ref count changed, no hash cached.
-- A finished, aborted or preempted request references zero blocks.
-- The sum over requests of block-table lengths equals the sum of ref counts.
+The cache contains `num_blocks` blocks, each holding `block_size` tokens. A request with `n` computed or scheduled tokens needs exactly `ceil(n / block_size)` blocks.
 
-### Scheduling model
+Each request has an append-only block table while it holds cache blocks. Finishing, aborting or preempting a request releases its entire table.
 
-One `schedule()` call per step. Running requests are served before waiting ones; admission is
-FCFS. One token budget (`max_num_batched_tokens`) is spent by prefill and decode tokens alike, and
-at most `max_num_seqs` requests run at once. Chunked prefill caps a request's tokens by the
-remaining budget. When a running request cannot get its blocks, running requests are preempted
-LIFO; a preempted request goes back to the head of the waiting queue and is recomputed from
-scratch, keeping its generated tokens. A step in which a preemption happened admits no waiting
-request. A request in partial prefill produces no output token. Between steps a decoding request
-has `num_computed_tokens == num_tokens - 1`: the sampled token is appended to its tokens and
-computed in the next step. On admission with prefix caching, the cache lookup covers at most
-`num_tokens - 1` tokens, so a fully cached prompt recomputes its whole last block and at least one
-token is always computed. The output of a request never depends on scheduling decisions: a
-preempted and resumed request produces the same token ids as an uninterrupted one.
+The simulator supports full attention only. It does not model hybrid allocators, sliding windows, multimodal inputs, LoRA, speculative decoding or async scheduling.
 
-### Measurement honesty
+The following invariants apply:
 
-Measured numbers come from the engines and the load client; estimated numbers come from the
-simulator; every table, plot and sentence says which is which.
+- A block is either free (`ref_cnt == 0`, in the free queue) or allocated (`ref_cnt > 0`, outside the free queue).
+- The total block count never changes.
+- A block's reference count equals the number of request block tables containing it.
+- Every hashed block has a matching hash-map entry pointing to it. Blocks outside the map have no hash.
+- Cached blocks can be free and available for reuse until eviction, or allocated and shared by requests.
+- Failed allocations leave blocks, reference counts and cache entries unchanged.
+- Finished, aborted and preempted requests hold no blocks.
+- The sum of block-table lengths equals the sum of reference counts.
+
+### Scheduling
+
+Each step calls `schedule()` once. Running requests are served first, then waiting requests in arrival order.
+
+Prefill and decode share the `max_num_batched_tokens` budget. At most `max_num_seqs` requests can run at once. Chunked prefill limits each request to the remaining token budget.
+
+If a running request cannot allocate blocks, running requests are preempted in LIFO order. A preempted request releases its blocks and returns to the head of the waiting queue. It keeps its generated tokens but must recompute them along with the prompt. A step that preempts a request admits no waiting requests.
+
+Partial prefill produces no output token. Between decode steps, `num_computed_tokens == num_tokens - 1`: the newly sampled token is appended to the request and computed in the next step.
+
+On admission, prefix-cache lookup covers at most `num_tokens - 1` tokens and reuses only full blocks. Even a fully cached prompt recomputes its last block, ensuring at least one token is computed.
+
+Output token IDs depend only on the request, not on scheduling. Preempting and resuming a request produces the same output as running it uninterrupted.
+
+### Measurements
+
+Simulator results are estimates. Engine and load-client results are measurements. Reports, tables and plots must distinguish the two.
 
 ## Differences from vLLM
 
-Deliberate simplifications, listed as the modules that carry them appear.
+This section records simplifications as they are implemented.
+
+- **Free queue:** the simulator uses an `OrderedDict`. vLLM stores doubly linked list pointers on the blocks themselves (`prev_free_block`, `next_free_block`) to avoid extra Python object allocations. Both support O(1) queue operations and removal by block.
+- **Null block:** vLLM reserves block 0 as a placeholder, excludes it from usage and never caches it. The simulator has no reserved block. Every block is allocatable and counts toward usage.
