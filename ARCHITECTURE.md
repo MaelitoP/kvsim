@@ -6,13 +6,13 @@ The simulator is deterministic. It does not execute a model or require a GPU, to
 
 ## Modules
 
-Code lives in `src/kv_cache_lab/`. The block pool and the request model are implemented.
+Code lives in `src/kv_cache_lab/`. The block pool, the request model and the KV cache manager are implemented.
 
 | Module | Responsibility | Status |
 | --- | --- | --- |
 | `block_pool.py` | Fixed block pool, reference counts, free queue and cache eviction | Implemented |
 | `request.py` | Request tokens, computed-token count, status and timeline | Implemented |
-| `kv_cache_manager.py` | Per-request block tables and prefix-cache lookup on admission | Planned |
+| `kv_cache_manager.py` | Per-request block tables and prefix-cache lookup on admission | Implemented, no prefix cache yet |
 | `prefix_cache.py` | Hashing full blocks with chained parent hashes | Planned |
 | `scheduler.py` | Token budget, chunked prefill, preemption and abort | Planned |
 | `workload.py` | Deterministic workloads from a JSON spec | Planned |
@@ -20,7 +20,7 @@ Code lives in `src/kv_cache_lab/`. The block pool and the request model are impl
 | `metrics.py` | Per-request metrics and aggregate results | Planned |
 | `__main__.py` | `simulate` and `summarize` commands | Planned |
 
-Tests live in `tests/`, with example tests and Hypothesis properties for each module. Shared helpers in `tests/invariants.py` check pool, manager and scheduler state after each operation. Scheduler state-machine tests will live in `tests/test_stateful.py`.
+Tests live in `tests/`, with example tests and Hypothesis properties for each module. Shared helpers in `tests/invariants.py` (`check_pool`, `check_manager`, `check_scheduler`) assert the memory invariants below after each operation; `check_manager` verifies that every reference count equals the number of block tables holding the block. Scheduler state-machine tests will live in `tests/test_stateful.py`.
 
 ## Block pool
 
@@ -46,6 +46,18 @@ The scheduler finishes a request only through `finish(status, step)`. It sets `s
 
 The timeline fields the metrics read are `first_scheduled_step`, `first_token_step` and `finished_step` (`None` until set) and `num_preemptions` (0 until the scheduler preempts the request). The scheduler fills them in; the request only stores them.
 
+## KV cache manager
+
+`KVCacheManager(num_blocks, block_size)` owns a `BlockPool` and `req_to_blocks`, one append-only block table per request keyed by `request_id`. Both sizes must be at least 1. Request ids must be unique among live requests; the scheduler and the workload generator own that uniqueness.
+
+`allocate_slots(request, num_new_tokens)` computes the blocks the request needs to hold `num_computed_tokens + num_new_tokens` tokens, `ceil(n / block_size)`, subtracts the blocks already in its table and asks the pool for the difference. When the pool cannot supply them it returns `None` and nothing changes: no block, no reference count, no table. On success it appends the new blocks to the table and returns them, possibly an empty list when the current blocks still have room. A request has a table from its first successful allocation until `free`, even when that allocation added no block. `num_new_tokens` is never negative: the table never runs ahead of `num_computed_tokens` plus the tokens being scheduled, so the block delta is never negative either.
+
+`free(request)` pops the table and frees its blocks in reverse order, so the free queue tail reads from the request's last block back to its first. Freeing a request without a table is a no-op, which lets the scheduler free aborted requests without checking whether they were ever scheduled.
+
+`num_blocks_for(request)`, `num_free_blocks` and `usage` (fraction of allocated blocks) are the counters the scheduler and the metrics read.
+
+Without caching, every block belongs to exactly one table, so two requests never share a block.
+
 ## Contracts
 
 These rules define the simulator's behavior. State invariants must hold after every public operation and are checked by the shared test helpers.
@@ -60,7 +72,7 @@ Simulated time consists of a step counter and an estimated duration from an expl
 
 The cache contains `num_blocks` blocks, each holding `block_size` tokens. A request with `n` computed or scheduled tokens needs exactly `ceil(n / block_size)` blocks.
 
-Each request has an append-only block table while it holds cache blocks. Finishing, aborting or preempting a request releases its entire table.
+Each request has an append-only block table from its first allocation until it is freed. Finishing, aborting or preempting a request releases its entire table.
 
 The simulator supports full attention only. It does not model hybrid allocators, sliding windows, multimodal inputs, LoRA, speculative decoding or async scheduling.
 

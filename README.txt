@@ -2,7 +2,7 @@ kv-cache-lab simulates how an LLM inference engine schedules requests and manage
 
 The simulator is deterministic, with tests checking memory invariants after each operation. It does not execute a model or require a GPU or tokenizer. The package has no runtime dependencies.
 
-Only the block pool and the request model are implemented. Next come the cache manager, scheduler, prefix caching, workloads and metrics. GPU benchmarks will follow, running the same workloads against vLLM and LMDeploy to compare measured results with the simulator's estimates. Nothing has been benchmarked yet.
+Only the block pool, the request model and the KV cache manager are implemented. Next come the scheduler, prefix caching, workloads and metrics. GPU benchmarks will follow, running the same workloads against vLLM and LMDeploy to compare measured results with the simulator's estimates. Nothing has been benchmarked yet.
 
 Architecture and behavioral contracts are documented in ARCHITECTURE.md.
 

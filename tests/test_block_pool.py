@@ -1,15 +1,9 @@
-from collections.abc import Iterable
-
 import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 
-from invariants import check_pool
-from kv_cache_lab.block_pool import BlockPool, KVCacheBlock
-
-
-def block_ids(blocks: Iterable[KVCacheBlock]) -> list[int]:
-    return [block.block_id for block in blocks]
+from invariants import block_ids, check_pool
+from kv_cache_lab.block_pool import BlockPool
 
 
 def test_allocation_follows_free_queue_order() -> None:
