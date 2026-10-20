@@ -1,7 +1,7 @@
 from importlib.metadata import version
 
-import kv_cache_lab
+import kvsim
 
 
 def test_version_matches_package_metadata() -> None:
-    assert kv_cache_lab.__version__ == version("kv-cache-lab")
+    assert kvsim.__version__ == version("kvsim")

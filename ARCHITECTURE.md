@@ -1,113 +1,99 @@
 # Architecture
 
-kv-cache-lab simulates the scheduler and paged KV-cache manager of an LLM inference engine, based on vLLM V1. It models block allocation, prefix caching, token budgets and preemption.
+kvsim models request scheduling and paged KV-cache allocation for a full-attention inference engine. It does not run a model or store KV tensors. Given the same request arrivals and sampled tokens, it produces the same batches and block assignments. It has no runtime dependencies and does not read the wall clock.
 
-The simulator is deterministic. It does not execute a model or require a GPU, tokenizer or runtime dependencies.
+## Components and ownership
 
-## Modules
-
-Code lives in `src/kv_cache_lab/`. The block pool, the request model and the KV cache manager are implemented.
-
-| Module | Responsibility | Status |
+| Module | Responsibility | Owned state |
 | --- | --- | --- |
-| `block_pool.py` | Fixed block pool, reference counts, free queue and cache eviction | Implemented |
-| `request.py` | Request tokens, computed-token count, status and timeline | Implemented |
-| `kv_cache_manager.py` | Per-request block tables and prefix-cache lookup on admission | Implemented, no prefix cache yet |
-| `prefix_cache.py` | Hashing full blocks with chained parent hashes | Planned |
-| `scheduler.py` | Token budget, chunked prefill, preemption and abort | Planned |
-| `workload.py` | Deterministic workloads from a JSON spec | Planned |
-| `simulator.py` | Workload replay and simulated time | Planned |
-| `metrics.py` | Per-request metrics and aggregate results | Planned |
-| `__main__.py` | `simulate` and `summarize` commands | Planned |
+| `block_pool.py` | Allocate, retain and release fixed-size blocks | Block objects, reference counts and free queue |
+| `request.py` | Store request inputs, progress and outcome | Prompt, generated tokens, status and timeline |
+| `kv_cache_manager.py` | Allocate blocks for each request | Block pool and request block tables |
+| `scheduler.py` | Build batches and apply sampled tokens | Waiting queue, running list, live request registry and pending batch |
 
-Tests live in `tests/`, with example tests and Hypothesis properties for each module. Shared helpers in `tests/invariants.py` (`check_pool`, `check_manager`, `check_scheduler`) assert the memory invariants below after each operation; `check_manager` verifies that every reference count equals the number of block tables holding the block. Scheduler state-machine tests will live in `tests/test_stateful.py`.
+`BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
-## Block pool
+`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig` and the returned `ScheduledBatch` are frozen dataclasses.
 
-`BlockPool(num_blocks)` creates all blocks at initialization. Blocks are never added or removed.
+### Block allocation
 
-Each `KVCacheBlock` has a `block_id`, a `ref_cnt` and an optional `block_hash`. All blocks start with no hash and a reference count of zero, queued in `block_id` order.
+`BlockPool(num_blocks)` creates blocks in ID order. `allocate(n)` takes blocks from the head of the free queue with a reference count of one. A negative count or insufficient capacity raises before changing state. `retain(blocks)` adds references and removes any newly referenced blocks from the free queue. `release(blocks)` removes references; blocks that reach zero join the tail in the supplied order. Releasing an already free block raises.
 
-The free queue determines eviction order:
+The free queue uses an `OrderedDict` for constant-time removal from the head, insertion at the tail and removal by block ID. `block_hash` is reserved for prefix caching; no current operation sets or indexes it.
 
-- `get_new_blocks(n)` takes blocks from the head and sets their reference counts to 1. A negative count or insufficient free blocks raises before changing any state.
-- `free_blocks(blocks)` decrements reference counts. Blocks that reach zero go to the tail in the supplied order, so callers control their relative eviction order. Freeing a block already at zero raises.
-- `touch(blocks)` increments reference counts, removing blocks from the free queue when they go from zero to one. This lets a request reuse a cached prefix that has not been evicted.
+`KVCacheManager(num_blocks, block_size)` requires both sizes to be positive. `allocate_slots(request, num_new_tokens)` reserves enough blocks for `request.num_computed_tokens + num_new_tokens`, rounded up by block size. The caller supplies a nonnegative count and advances computed tokens before allocating the next step. Existing block tables only grow until freed.
 
-`FreeBlockQueue` uses an `OrderedDict` keyed by block ID for O(1) removal from the head, insertion at the tail and removal by ID.
+An allocation returns the new blocks, possibly an empty list. It returns `None` without changing the pool or tables when capacity is insufficient. `free(request)` releases the entire table in reverse order, keeping earlier prompt blocks later in the free queue. Freeing a request without a table does nothing. `num_blocks_for`, `num_free_blocks` and `usage` report block counts and the fraction of allocated blocks.
 
-## Requests
+### Request lifecycle
 
-`Request` is a dataclass holding one generation request: `request_id`, the immutable `prompt_token_ids`, `max_output_tokens`, `arrival_step`, the growing `output_token_ids`, `num_computed_tokens` and a `status`. Derived views: `all_token_ids` (prompt followed by output), `num_prompt_tokens`, `num_output_tokens`, `num_tokens` and `is_finished`. There is no prefill-done flag: after a preemption the prompt and the generated tokens are recomputed together, so the scheduler reasons only about `num_tokens - num_computed_tokens`. The scheduler grows output through `append_output_token`.
+Callers construct a `Request` with its ID, prompt token tuple, output limit and arrival step. Progress fields cannot be passed to the constructor. The scheduler updates them after admission. `arrival_step` is metadata: the caller decides when to submit a request, and submission order determines queue order.
 
-`RequestStatus` has three live states, `WAITING`, `RUNNING` and `PREEMPTED`, and three finished states, `FINISHED_STOPPED` (EOS sampled), `FINISHED_LENGTH_CAPPED` (`max_output_tokens` reached) and `FINISHED_ABORTED`. `status.is_finished` distinguishes the two groups.
+Requests move from `WAITING` to `RUNNING`, then finish on EOS or the output limit. `finish(status, step)` rejects live statuses and a second finish. EOS takes precedence when both stop conditions apply. Completion releases the block table but keeps tokens, computed-token counts and timestamps on the returned request. `PREEMPTED` and `FINISHED_ABORTED` exist as statuses; the scheduler does not use them yet.
 
-The scheduler finishes a request only through `finish(status, step)`. It sets `status` and `finished_step`, and raises if the status is a live one or the request is already finished, so a request finishes at most once. Transitions between live states are plain assignments made by the scheduler.
+## One scheduling step
 
-The timeline fields the metrics read are `first_scheduled_step`, `first_token_step` and `finished_step` (`None` until set) and `num_preemptions` (0 until the scheduler preempts the request). The scheduler fills them in; the request only stores them.
+```python
+from kvsim.request import Request
+from kvsim.scheduler import Scheduler, SchedulerConfig
 
-## KV cache manager
+scheduler = Scheduler(SchedulerConfig(num_blocks=8, block_size=4, max_tokens_per_step=16))
+request = Request("r0", prompt_token_ids=(1, 2, 3, 4), max_output_tokens=2, arrival_step=0)
+scheduler.add_request(request)
 
-`KVCacheManager(num_blocks, block_size)` owns a `BlockPool` and `req_to_blocks`, one append-only block table per request keyed by `request_id`. Both sizes must be at least 1. Request ids must be unique among live requests; the scheduler and the workload generator own that uniqueness.
+batch = scheduler.schedule()
+assert batch.num_scheduled_tokens == {"r0": 4}
+assert scheduler.complete_step(batch, {"r0": 7}) == []
 
-`allocate_slots(request, num_new_tokens)` computes the blocks the request needs to hold `num_computed_tokens + num_new_tokens` tokens, `ceil(n / block_size)`, subtracts the blocks already in its table and asks the pool for the difference. When the pool cannot supply them it returns `None` and nothing changes: no block, no reference count, no table. On success it appends the new blocks to the table and returns them, possibly an empty list when the current blocks still have room. A request has a table from its first successful allocation until `free`, even when that allocation added no block. `num_new_tokens` is never negative: the table never runs ahead of `num_computed_tokens` plus the tokens being scheduled, so the block delta is never negative either.
+batch = scheduler.schedule()
+assert batch.num_scheduled_tokens == {"r0": 1}
+assert scheduler.complete_step(batch, {"r0": 8}) == [request]
+```
 
-`free(request)` pops the table and frees its blocks in reverse order, so the free queue tail reads from the request's last block back to its first. Freeing a request without a table is a no-op, which lets the scheduler free aborted requests without checking whether they were ever scheduled.
+`add_request` rejects a live ID, a request that is not waiting with zero progress and no output, an empty prompt, or an output limit below one. A prompt must fit both the whole token budget and the whole cache. Rejection leaves the queues unchanged.
 
-`num_blocks_for(request)`, `num_free_blocks` and `usage` (fraction of allocated blocks) are the counters the scheduler and the metrics read.
+`schedule()` serves running requests in admission order, then waiting requests in submission order. Prefill and decode share `max_tokens_per_step`. At most `max_running_requests` requests run at once. A waiting request needs room for its whole prompt; if the head cannot fit the remaining budget or free blocks, admission stops. Later requests do not skip ahead.
 
-Without caching, every block belongs to exactly one table, so two requests never share a block.
+Each running request currently needs one decode token. Their combined work fits the budget because each prior admission consumed at least one token. Running-request cache exhaustion raises `RuntimeError` and ends the run. The scheduler does not roll back earlier allocations in that failed call; recovery requires preemption.
 
-## Contracts
+The returned batch records a step number, token counts, `scheduled_running` and `scheduled_new`. The token-count mapping is a read-only copy in running-then-new order; the ID sequences are tuples. Step numbers start at zero, and `num_steps` counts returned batches, including empty ones. Scheduling reserves blocks without advancing computed tokens.
 
-These rules define the simulator's behavior. State invariants must hold after every public operation and are checked by the shared test helpers.
+`complete_step(batch, sampled_token_ids)` accepts only the exact pending batch returned by this scheduler. A second `schedule()` before completion raises `RuntimeError`. A foreign, copied or replayed batch raises `ValueError`. Missing sampled IDs also raise `ValueError` before any state changes; extra IDs are ignored. After rejection, callers can correct the input and retry the pending batch.
 
-### Determinism
+Completion advances computed-token counts, appends one sampled token per scheduled request and records the first-token timestamp. It finishes requests, releases their blocks, removes them from the live registry and returns them in batch order. Only then does it clear the pending batch. Empty batches also need completion. Requests added while a batch is pending wait for the next step.
 
-The simulator never reads the wall clock or uses unseeded randomness. The same workload spec, configuration and seed produce a byte-identical trace.
+## Current invariants and tests
 
-Simulated time consists of a step counter and an estimated duration from an explicit cost model. Both are reported, with durations labelled as estimates.
+- The pool contains the same block objects throughout its lifetime. A block is free exactly when its reference count is zero and it appears in the free queue.
+- A block's reference count matches the request tables holding it. Requests do not share blocks yet.
+- A request table covers its computed tokens plus the tokens reserved by the pending batch, rounded up by block size. Waiting and finished requests hold no blocks.
+- Each live request belongs to exactly one queue with the matching status and object identity. Finished requests leave the registry.
+- Between completed decode steps, a running request has `num_computed_tokens == num_tokens - 1`. The sampled token gets computed in the next step.
 
-### Memory
+`tests/invariants.py` checks pool, table and queue state. Example tests cover allocation order, failure behavior, admission, stopping and batch ownership. Hypothesis exercises block reference operations, request-table growth, and scheduling with varied arrivals and EOS tokens. The scheduler property has a step bound so stalled progress fails the test.
 
-The cache contains `num_blocks` blocks, each holding `block_size` tokens. A request with `n` computed or scheduled tokens needs exactly `ceil(n / block_size)` blocks.
+## vLLM references and differences
 
-Each request has an append-only block table from its first allocation until it is freed. Finishing, aborting or preempting a request releases its entire table.
+These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 
-The simulator supports full attention only. It does not model hybrid allocators, sliding windows, multimodal inputs, LoRA, speculative decoding or async scheduling.
+| Lab name | vLLM counterpart |
+| --- | --- |
+| `BlockPool.allocate`, `retain`, `release` | [`get_new_blocks`, `touch`, `free_blocks`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/block_pool.py) |
+| `KVCacheManager.allocate_slots` | [`KVCacheManager.allocate_slots`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_manager.py) |
+| `max_running_requests`, `max_tokens_per_step` | [`max_num_seqs`, `max_num_batched_tokens`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
+| `ScheduledBatch`, `complete_step` | [`SchedulerOutput`, `update_from_output`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
 
-The following invariants apply:
+The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
 
-- A block is either free (`ref_cnt == 0`, in the free queue) or allocated (`ref_cnt > 0`, outside the free queue).
-- The total block count never changes.
-- A block's reference count equals the number of request block tables containing it.
-- Every hashed block has a matching hash-map entry pointing to it. Blocks outside the map have no hash.
-- Cached blocks can be free and available for reuse until eviction, or allocated and shared by requests.
-- Failed allocations leave blocks, reference counts and cache entries unchanged.
-- Finished, aborted and preempted requests hold no blocks.
-- The sum of block-table lengths equals the sum of reference counts.
+The lab allocates every block, including block zero. vLLM reserves a null block. The lab always appends released blocks to the free queue; this vLLM revision distinguishes reuse order for cached and uncached blocks.
 
-### Scheduling
+The lab rejects prompts larger than its budget or total cache capacity, then admits them against currently free blocks. It does not reserve space for future output or enforce `max_model_len`. vLLM's allocator also supports full-sequence admission checks. The lab supports FCFS and stops on EOS or the output limit.
 
-Each step calls `schedule()` once. Running requests are served first, then waiting requests in arrival order.
+## Planned features
 
-Prefill and decode share the `max_num_batched_tokens` budget. At most `max_num_seqs` requests can run at once. Chunked prefill limits each request to the remaining token budget.
+- **M6, chunked prefill:** cap running work by the remaining budget and append output only after prefill completes. Add chunking and long-prefill settings with this behavior.
+- **M7, preemption:** release blocks in LIFO request order, return preempted requests to the waiting head, and recompute their prompt and generated tokens. A step that preempts admits no waiting requests. M7 will decide how resumed requests appear in the batch.
+- **M10, prefix caching:** hash full blocks with chained parent hashes, share cached prefixes, and remove hash entries on eviction. Admission lookup covers at most `num_tokens - 1` tokens so some computation remains.
+- **Abort, workloads and metrics:** add request cancellation, deterministic workload replay, traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
 
-If a running request cannot allocate blocks, running requests are preempted in LIFO order. A preempted request releases its blocks and returns to the head of the waiting queue. It keeps its generated tokens but must recompute them along with the prompt. A step that preempts a request admits no waiting requests.
-
-Partial prefill produces no output token. Between decode steps, `num_computed_tokens == num_tokens - 1`: the newly sampled token is appended to the request and computed in the next step.
-
-On admission, prefix-cache lookup covers at most `num_tokens - 1` tokens and reuses only full blocks. Even a fully cached prompt recomputes its last block, ensuring at least one token is computed.
-
-Output token IDs depend only on the request, not on scheduling. Preempting and resuming a request produces the same output as running it uninterrupted.
-
-### Measurements
-
-Simulator results are estimates. Engine and load-client results are measurements. Reports, tables and plots must distinguish the two.
-
-## Differences from vLLM
-
-This section records simplifications as they are implemented.
-
-- **Free queue:** the simulator uses an `OrderedDict`. vLLM stores doubly linked list pointers on the blocks themselves (`prev_free_block`, `next_free_block`) to avoid extra Python object allocations. Both support O(1) queue operations and removal by block.
-- **Null block:** vLLM reserves block 0 as a placeholder, excludes it from usage and never caches it. The simulator has no reserved block. Every block is allocatable and counts toward usage.
+Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

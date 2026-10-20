@@ -5,8 +5,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from invariants import block_ids, check_manager
-from kv_cache_lab.kv_cache_manager import KVCacheManager
-from kv_cache_lab.request import Request
+from kvsim.kv_cache_manager import KVCacheManager
+from kvsim.request import Request
 
 
 def make_request(request_id: str = "r0") -> Request:
@@ -17,9 +17,12 @@ def make_request(request_id: str = "r0") -> Request:
 
 def snapshot(manager: KVCacheManager) -> tuple[list[int], list[int], dict[str, list[int]]]:
     return (
-        [block.ref_cnt for block in manager.block_pool.blocks],
-        block_ids(manager.block_pool.free_queue),
-        {request_id: block_ids(blocks) for request_id, blocks in manager.req_to_blocks.items()},
+        [block.ref_count for block in manager.block_pool._blocks],
+        block_ids(manager.block_pool._free_queue),
+        {
+            request_id: block_ids(blocks)
+            for request_id, blocks in manager._blocks_by_request.items()
+        },
     )
 
 
@@ -39,10 +42,10 @@ def test_a_new_block_is_allocated_every_block_size_tokens() -> None:
         request.num_computed_tokens += 1
         assert manager.num_blocks_for(request) == math.ceil(token / 4)
         check_manager(manager)
-    assert block_ids(manager.req_to_blocks["r0"]) == [0, 1, 2]
+    assert block_ids(manager._blocks_by_request["r0"]) == [0, 1, 2]
 
 
-def test_failed_allocation_and_unknown_free_leave_pool_and_tables_untouched() -> None:
+def test_failed_allocation_and_unknown_free_leave_pool_and_tables_unchanged() -> None:
     manager = KVCacheManager(num_blocks=2, block_size=4)
     running = make_request("running")
     assert manager.allocate_slots(running, num_new_tokens=4) is not None
@@ -52,7 +55,7 @@ def test_failed_allocation_and_unknown_free_leave_pool_and_tables_untouched() ->
     assert manager.allocate_slots(make_request("waiting"), num_new_tokens=9) is None
     manager.free(make_request("waiting"))
     assert snapshot(manager) == before
-    assert "waiting" not in manager.req_to_blocks
+    assert "waiting" not in manager._blocks_by_request
     check_manager(manager)
 
 
@@ -64,7 +67,7 @@ def test_free_returns_every_block_with_the_tail_block_first() -> None:
     assert block_ids(new_blocks) == [0, 1, 2]
     assert manager.usage == 0.75
     manager.free(request)
-    assert block_ids(manager.block_pool.free_queue) == [3, 2, 1, 0]
+    assert block_ids(manager.block_pool._free_queue) == [3, 2, 1, 0]
     assert manager.num_blocks_for(request) == 0
     assert manager.usage == 0.0
     check_manager(manager)
@@ -95,7 +98,7 @@ def test_requests_grow_by_ceil_and_never_share_blocks(
             else:
                 request.num_computed_tokens += num_new_tokens
                 assert len(held) + len(new_blocks) == required
-                assert block_ids(manager.req_to_blocks[request.request_id]) == held + block_ids(
-                    new_blocks
-                )
+                assert block_ids(
+                    manager._blocks_by_request[request.request_id]
+                ) == held + block_ids(new_blocks)
         check_manager(manager)

@@ -1,12 +1,23 @@
+from inspect import signature
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from kv_cache_lab.request import Request, RequestStatus
+from kvsim.request import Request, RequestStatus
 
 
 def make_request(prompt: tuple[int, ...] = (0, 1, 2, 3)) -> Request:
     return Request(request_id="r0", prompt_token_ids=prompt, max_output_tokens=8, arrival_step=0)
+
+
+def test_constructor_accepts_only_request_inputs() -> None:
+    assert tuple(signature(Request).parameters) == (
+        "request_id",
+        "prompt_token_ids",
+        "max_output_tokens",
+        "arrival_step",
+    )
 
 
 def test_new_request_is_waiting_with_nothing_computed() -> None:

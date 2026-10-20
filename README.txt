@@ -1,12 +1,10 @@
-kv-cache-lab simulates how an LLM inference engine schedules requests and manages a paged KV cache, based on vLLM V1. I'm building it to understand block allocation, prefix caching, prefill and decode batching, and preemption under memory pressure.
+kvsim is a Python simulator for learning how vLLM schedules requests and manages a paged KV cache. It does not run a model or require a GPU, tokenizer or runtime dependencies.
 
-The simulator is deterministic, with tests checking memory invariants after each operation. It does not execute a model or require a GPU or tokenizer. The package has no runtime dependencies.
+Implemented: block allocation and reference counts, request tracking, per-request block tables, and FCFS batching under a shared prefill and decode token budget. The caller supplies sampled tokens. Chunked prefill, preemption, prefix caching, workloads and metrics are planned.
 
-Only the block pool, the request model and the KV cache manager are implemented. Next come the scheduler, prefix caching, workloads and metrics. GPU benchmarks will follow, running the same workloads against vLLM and LMDeploy to compare measured results with the simulator's estimates. Nothing has been benchmarked yet.
+See ARCHITECTURE.md for the scheduling example, state ownership, contracts and vLLM references.
 
-Architecture and behavioral contracts are documented in ARCHITECTURE.md.
-
-Development requires Python 3.12 and uv. To sync the environment and run lint, type checks and tests:
+Development requires Python 3.12 and uv. Sync the environment and run lint, type checks and tests with:
 
     make check
 

@@ -21,23 +21,19 @@ class RequestStatus(Enum):
 
 @dataclass(eq=False)
 class Request:
-    """One generation request: its tokens, how many are computed, its status and timeline.
-
-    `num_computed_tokens` counts tokens of `all_token_ids` whose KV entries exist in the cache.
-    A request is finished at most once, through `finish`.
-    """
+    """Computed-token counts remain after completion releases the cache blocks."""
 
     request_id: str
     prompt_token_ids: tuple[int, ...] = field(repr=False)
     max_output_tokens: int
     arrival_step: int
-    output_token_ids: list[int] = field(default_factory=list, repr=False)
-    num_computed_tokens: int = 0
-    status: RequestStatus = RequestStatus.WAITING
-    first_scheduled_step: int | None = None
-    first_token_step: int | None = None
-    finished_step: int | None = None
-    num_preemptions: int = 0
+    output_token_ids: list[int] = field(init=False, default_factory=list, repr=False)
+    num_computed_tokens: int = field(init=False, default=0)
+    status: RequestStatus = field(init=False, default=RequestStatus.WAITING)
+    first_scheduled_step: int | None = field(init=False, default=None)
+    first_token_step: int | None = field(init=False, default=None)
+    finished_step: int | None = field(init=False, default=None)
+    num_preemptions: int = field(init=False, default=0)
 
     @property
     def all_token_ids(self) -> tuple[int, ...]:
