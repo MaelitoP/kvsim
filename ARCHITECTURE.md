@@ -6,12 +6,12 @@ The simulator is deterministic. It does not execute a model or require a GPU, to
 
 ## Modules
 
-Code lives in `src/kv_cache_lab/`. Only the block pool is implemented.
+Code lives in `src/kv_cache_lab/`. The block pool and the request model are implemented.
 
 | Module | Responsibility | Status |
 | --- | --- | --- |
 | `block_pool.py` | Fixed block pool, reference counts, free queue and cache eviction | Implemented |
-| `requests.py` | Request tokens, computed-token count, status and timeline | Planned |
+| `request.py` | Request tokens, computed-token count, status and timeline | Implemented |
 | `kv_cache_manager.py` | Per-request block tables and prefix-cache lookup on admission | Planned |
 | `prefix_cache.py` | Hashing full blocks with chained parent hashes | Planned |
 | `scheduler.py` | Token budget, chunked prefill, preemption and abort | Planned |
@@ -35,6 +35,16 @@ The free queue determines eviction order:
 - `touch(blocks)` increments reference counts, removing blocks from the free queue when they go from zero to one. This lets a request reuse a cached prefix that has not been evicted.
 
 `FreeBlockQueue` uses an `OrderedDict` keyed by block ID for O(1) removal from the head, insertion at the tail and removal by ID.
+
+## Requests
+
+`Request` is a dataclass holding one generation request: `request_id`, the immutable `prompt_token_ids`, `max_output_tokens`, `arrival_step`, the growing `output_token_ids`, `num_computed_tokens` and a `status`. Derived views: `all_token_ids` (prompt followed by output), `num_prompt_tokens`, `num_output_tokens`, `num_tokens` and `is_finished`. There is no prefill-done flag: after a preemption the prompt and the generated tokens are recomputed together, so the scheduler reasons only about `num_tokens - num_computed_tokens`. The scheduler grows output through `append_output_token`.
+
+`RequestStatus` has three live states, `WAITING`, `RUNNING` and `PREEMPTED`, and three finished states, `FINISHED_STOPPED` (EOS sampled), `FINISHED_LENGTH_CAPPED` (`max_output_tokens` reached) and `FINISHED_ABORTED`. `status.is_finished` distinguishes the two groups.
+
+The scheduler finishes a request only through `finish(status, step)`. It sets `status` and `finished_step`, and raises if the status is a live one or the request is already finished, so a request finishes at most once. Transitions between live states are plain assignments made by the scheduler.
+
+The timeline fields the metrics read are `first_scheduled_step`, `first_token_step` and `finished_step` (`None` until set) and `num_preemptions` (0 until the scheduler preempts the request). The scheduler fills them in; the request only stores them.
 
 ## Contracts
 
