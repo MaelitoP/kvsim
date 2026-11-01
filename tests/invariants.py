@@ -2,6 +2,7 @@ import math
 from collections import Counter
 from collections.abc import Iterable, Mapping
 
+from kvsim.block_hash import hash_full_blocks
 from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
 from kvsim.request import Request, RequestStatus
@@ -38,12 +39,20 @@ def check_manager(manager: KVCacheManager) -> None:
     references = Counter(
         block.block_id for blocks in manager._blocks_by_request.values() for block in blocks
     )
-    for blocks in manager._blocks_by_request.values():
+    for request_id, blocks in manager._blocks_by_request.items():
+        assert len(set(block_ids(blocks))) == len(blocks)
         for block in blocks:
             assert block is pool._blocks[block.block_id]
+        num_cached_blocks = manager._num_cached_blocks.get(request_id, 0)
+        assert num_cached_blocks <= len(blocks)
+        assert all(block.block_hash is None for block in blocks[num_cached_blocks:])
+    assert set(manager._num_cached_blocks) <= set(manager._blocks_by_request)
     for block in pool._blocks:
         assert block.ref_count == references[block.block_id]
-        assert block.ref_count <= 1
+    if not manager.enable_caching:
+        assert not manager._num_cached_blocks
+        assert all(block.ref_count <= 1 for block in pool._blocks)
+        assert not pool._block_by_hash
 
 
 def check_scheduler(scheduler: Scheduler) -> None:
@@ -65,6 +74,11 @@ def check_scheduler(scheduler: Scheduler) -> None:
     assert len(waiting) + len(running) == len(scheduler._requests)
     assert set(request_ids(waiting + running)) == set(scheduler._requests)
     assert set(manager._blocks_by_request) <= set(request_ids(running))
+    assert scheduler.prefix_cache_hits <= scheduler.prefix_cache_queries
+    assert scheduler.prefix_cache_hits % block_size == 0
+    if not scheduler.config.enable_prefix_caching:
+        assert scheduler.prefix_cache_queries == 0
+        assert all(not request.block_hashes for request in waiting + running)
     preempted_flags = [request.status is RequestStatus.PREEMPTED for request in waiting]
     assert preempted_flags == sorted(preempted_flags, reverse=True)
     for request in waiting:
@@ -85,6 +99,20 @@ def check_scheduler(scheduler: Scheduler) -> None:
         num_reserved_tokens = request.num_computed_tokens + scheduled.get(request.request_id, 0)
         assert num_reserved_tokens <= request.num_tokens
         assert manager.num_blocks_for(request) == math.ceil(num_reserved_tokens / block_size)
+        if scheduler.config.enable_prefix_caching:
+            num_cached_blocks = manager._num_cached_blocks[request.request_id]
+            assert num_cached_blocks == num_reserved_tokens // block_size
+            block_hashes = request.block_hashes
+            assert len(block_hashes) >= num_cached_blocks
+            assert (
+                block_hashes
+                == hash_full_blocks(block_size, request.all_token_ids)[: len(block_hashes)]
+            )
+            blocks = manager._blocks_by_request[request.request_id]
+            for block, block_hash in zip(
+                blocks[:num_cached_blocks], block_hashes[:num_cached_blocks], strict=True
+            ):
+                assert block.block_hash in (None, block_hash)
         if pending is None:
             assert 1 <= request.num_computed_tokens < request.num_tokens
             if request.output_token_ids and request.num_preemptions == 0:

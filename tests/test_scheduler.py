@@ -22,11 +22,14 @@ MAX_COMPUTED_TOKENS = MAX_PROMPT + MAX_OUTPUT - 1
 
 
 def make_request(
-    request_id: str, num_prompt_tokens: int = 4, max_output_tokens: int = MAX_OUTPUT
+    request_id: str,
+    num_prompt_tokens: int = 4,
+    max_output_tokens: int = MAX_OUTPUT,
+    first_token_id: int = 1,
 ) -> Request:
     return Request(
         request_id=request_id,
-        prompt_token_ids=tuple(range(1, num_prompt_tokens + 1)),
+        prompt_token_ids=tuple(range(first_token_id, first_token_id + num_prompt_tokens)),
         max_output_tokens=max_output_tokens,
         arrival_step=0,
     )
@@ -38,6 +41,7 @@ def make_scheduler(
     max_tokens_per_step: int = 2048,
     enable_chunked_prefill: bool = True,
     long_prefill_token_threshold: int = 0,
+    enable_prefix_caching: bool = False,
 ) -> Scheduler:
     return Scheduler(
         SchedulerConfig(
@@ -47,6 +51,7 @@ def make_scheduler(
             max_tokens_per_step=max_tokens_per_step,
             enable_chunked_prefill=enable_chunked_prefill,
             long_prefill_token_threshold=long_prefill_token_threshold,
+            enable_prefix_caching=enable_prefix_caching,
             eos_token_id=EOS,
         )
     )
@@ -352,6 +357,86 @@ def test_a_resumed_request_keeps_its_output_and_samples_after_its_last_recompute
     assert outputs[2:] == [[TOKEN], [TOKEN], [TOKEN], [TOKEN, TOKEN]]
 
 
+def test_identical_prompts_admitted_in_the_same_step_share_blocks() -> None:
+    scheduler = make_scheduler(num_blocks=4, enable_prefix_caching=True)
+    scheduler.add_request(make_request("first", num_prompt_tokens=9))
+    scheduler.add_request(make_request("second", num_prompt_tokens=9))
+    batch, _ = run_step(scheduler)
+    assert batch.num_scheduled_tokens == {"first": 9, "second": 1}
+    tables = scheduler.kv_cache_manager._blocks_by_request
+    assert tables["second"][:2] == tables["first"][:2]
+    assert [block.ref_count for block in tables["second"]] == [2, 2, 1]
+    assert (scheduler.prefix_cache_queries, scheduler.prefix_cache_hits) == (18, 8)
+
+
+@pytest.mark.parametrize(
+    ("num_prompt_tokens", "num_hit_tokens"), [(3, 0), (4, 0), (16, 12), (17, 16)]
+)
+def test_a_cache_hit_always_leaves_a_token_to_compute(
+    num_prompt_tokens: int, num_hit_tokens: int
+) -> None:
+    scheduler = make_scheduler(enable_prefix_caching=True)
+    scheduler.add_request(make_request("cached", num_prompt_tokens, max_output_tokens=1))
+    run_step(scheduler)
+    scheduler.add_request(make_request("hit", num_prompt_tokens))
+    batch, _ = run_step(scheduler)
+    assert batch.num_scheduled_tokens == {"hit": num_prompt_tokens - num_hit_tokens}
+    assert scheduler.prefix_cache_hits == num_hit_tokens
+
+
+@pytest.mark.parametrize(
+    ("old_max_output_tokens", "resume_step", "num_hit_tokens"), [(4, 4, 4), (6, 6, 0)]
+)
+def test_a_resumed_request_hits_its_own_blocks_unless_they_were_evicted(
+    old_max_output_tokens: int, resume_step: int, num_hit_tokens: int
+) -> None:
+    scheduler = make_scheduler(num_blocks=3, enable_prefix_caching=True)
+    scheduler.add_request(
+        make_request(
+            "old", num_prompt_tokens=4, max_output_tokens=old_max_output_tokens, first_token_id=100
+        )
+    )
+    scheduler.add_request(
+        make_request("young", num_prompt_tokens=6, max_output_tokens=2, first_token_id=200)
+    )
+    batches = [run_step(scheduler)[0] for _ in range(resume_step + 1)]
+    assert batches[1].preempted == ("young",)
+    assert batches[-1].scheduled_resumed == ("young",)
+    assert batches[-1].num_scheduled_tokens == {"young": 7 - num_hit_tokens}
+    assert scheduler.prefix_cache_queries == 4 + 6 + 7
+    assert scheduler.prefix_cache_hits == num_hit_tokens
+
+
+def test_a_block_completed_by_decoding_is_cached() -> None:
+    scheduler = make_scheduler(enable_prefix_caching=True)
+    scheduler.add_request(make_request("first", num_prompt_tokens=3, max_output_tokens=2))
+    run_step(scheduler)
+    run_step(scheduler)
+    scheduler.add_request(
+        Request(
+            request_id="hit",
+            prompt_token_ids=(1, 2, 3, TOKEN, 5),
+            max_output_tokens=1,
+            arrival_step=0,
+        )
+    )
+    batch, _ = run_step(scheduler)
+    assert batch.num_scheduled_tokens == {"hit": 1}
+
+
+def test_hits_let_a_prompt_fit_the_budget_with_chunked_prefill_off() -> None:
+    scheduler = make_scheduler(
+        max_tokens_per_step=8, enable_chunked_prefill=False, enable_prefix_caching=True
+    )
+    scheduler.add_request(make_request("cached", num_prompt_tokens=8, max_output_tokens=1))
+    run_step(scheduler)
+    scheduler.add_request(make_request("decoding", num_prompt_tokens=1, first_token_id=100))
+    run_step(scheduler)
+    scheduler.add_request(make_request("hit", num_prompt_tokens=8, max_output_tokens=1))
+    batch, _ = run_step(scheduler)
+    assert batch.num_scheduled_tokens == {"decoding": 1, "hit": 4}
+
+
 def test_max_running_requests_caps_admission() -> None:
     scheduler = make_scheduler(max_running_requests=2)
     for index in range(3):
@@ -462,6 +547,7 @@ def test_requests_added_during_a_pending_batch_wait_until_the_next_step() -> Non
     arrivals=st.lists(st.integers(0, 3), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
     max_running_requests=st.integers(2, 4),
     num_spare_blocks=st.integers(0, 2),
+    enable_prefix_caching=st.booleans(),
     prefill=st.tuples(st.just(False), st.integers(MAX_COMPUTED_TOKENS, 2 * MAX_PROMPT), st.just(0))
     | st.tuples(st.just(True), st.integers(1, 2 * MAX_PROMPT), st.integers(0, MAX_PROMPT)),
 )
@@ -471,6 +557,7 @@ def test_limits_hold_and_every_request_finishes_with_its_expected_output(
     arrivals: list[int],
     max_running_requests: int,
     num_spare_blocks: int,
+    enable_prefix_caching: bool,
     prefill: tuple[bool, int, int],
 ) -> None:
     enable_chunked_prefill, max_tokens_per_step, long_prefill_token_threshold = prefill
@@ -481,6 +568,7 @@ def test_limits_hold_and_every_request_finishes_with_its_expected_output(
         max_tokens_per_step=max_tokens_per_step,
         enable_chunked_prefill=enable_chunked_prefill,
         long_prefill_token_threshold=long_prefill_token_threshold,
+        enable_prefix_caching=enable_prefix_caching,
     )
     requests = [
         make_request(f"r{index}", num_prompt_tokens=prompt) for index, prompt in enumerate(prompts)

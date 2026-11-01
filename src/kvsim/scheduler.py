@@ -15,6 +15,7 @@ class SchedulerConfig:
     max_tokens_per_step: int = 2048
     enable_chunked_prefill: bool = True
     long_prefill_token_threshold: int = 0
+    enable_prefix_caching: bool = True
     eos_token_id: int = 0
 
     def __post_init__(self) -> None:
@@ -54,9 +55,13 @@ class Scheduler:
         self._waiting: deque[Request] = deque()
         self._running: list[Request] = []
         self._requests: dict[str, Request] = {}
-        self.kv_cache_manager = KVCacheManager(config.num_blocks, config.block_size)
+        self.kv_cache_manager = KVCacheManager(
+            config.num_blocks, config.block_size, enable_caching=config.enable_prefix_caching
+        )
         self.num_steps = 0
         self.num_preemptions = 0
+        self.prefix_cache_queries = 0
+        self.prefix_cache_hits = 0
         self._pending_batch: ScheduledBatch | None = None
 
     @property
@@ -139,11 +144,16 @@ class Scheduler:
             and len(self._running) < self.config.max_running_requests
         ):
             request = self._waiting[0]
-            num_new_tokens = request.num_tokens - request.num_computed_tokens
+            computed_blocks = self.kv_cache_manager.get_computed_blocks(request)
+            num_computed_tokens = len(computed_blocks) * self.config.block_size
+            num_new_tokens = request.num_tokens - num_computed_tokens
             if not self.config.enable_chunked_prefill and num_new_tokens > token_budget:
                 break
             num_new_tokens = min(num_new_tokens, max_tokens_per_request, token_budget)
-            if self.kv_cache_manager.allocate_slots(request, num_new_tokens) is None:
+            new_blocks = self.kv_cache_manager.allocate_slots(
+                request, num_new_tokens, computed_blocks
+            )
+            if new_blocks is None:
                 break
             self._waiting.popleft()
             self._running.append(request)
@@ -153,6 +163,10 @@ class Scheduler:
                 request.first_scheduled_step = step
                 scheduled_new.append(request.request_id)
             request.status = RequestStatus.RUNNING
+            request.num_computed_tokens = num_computed_tokens
+            if self.config.enable_prefix_caching:
+                self.prefix_cache_queries += request.num_tokens
+                self.prefix_cache_hits += num_computed_tokens
             num_scheduled_tokens[request.request_id] = num_new_tokens
             token_budget -= num_new_tokens
 
