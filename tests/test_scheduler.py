@@ -97,7 +97,6 @@ def run_step(
         *batch.preempted[::-1],
         *waiting_before[len(admitted) :],
     ]
-    assert tuple(batch.num_scheduled_tokens) == (*batch.scheduled_running, *admitted)
     completing = {
         request_id
         for request_id, num_new_tokens in batch.num_scheduled_tokens.items()
@@ -435,6 +434,98 @@ def test_hits_let_a_prompt_fit_the_budget_with_chunked_prefill_off() -> None:
     scheduler.add_request(make_request("hit", num_prompt_tokens=8, max_output_tokens=1))
     batch, _ = run_step(scheduler)
     assert batch.num_scheduled_tokens == {"decoding": 1, "hit": 4}
+
+
+def make_waiting() -> tuple[Scheduler, Request]:
+    scheduler = make_scheduler(enable_prefix_caching=True)
+    target = make_request("target")
+    scheduler.add_request(target)
+    return scheduler, target
+
+
+def make_partial_prefill() -> tuple[Scheduler, Request]:
+    scheduler = make_scheduler(max_tokens_per_step=4, enable_prefix_caching=True)
+    target = make_request("target", num_prompt_tokens=9)
+    scheduler.add_request(target)
+    run_step(scheduler)
+    assert 0 < target.num_computed_tokens < target.num_prompt_tokens
+    return scheduler, target
+
+
+def make_decoding() -> tuple[Scheduler, Request]:
+    scheduler = make_scheduler(enable_prefix_caching=True)
+    target = make_request("target", num_prompt_tokens=5)
+    scheduler.add_request(target)
+    run_step(scheduler)
+    assert target.output_token_ids == [TOKEN]
+    return scheduler, target
+
+
+def make_preempted() -> tuple[Scheduler, Request]:
+    scheduler = make_scheduler(num_blocks=3, enable_prefix_caching=True)
+    scheduler.add_request(make_request("old", num_prompt_tokens=4, first_token_id=100))
+    target = make_request("target", num_prompt_tokens=6, max_output_tokens=2, first_token_id=200)
+    scheduler.add_request(target)
+    for _ in range(4):
+        run_step(scheduler)
+    assert target.status is RequestStatus.PREEMPTED
+    assert request_ids(scheduler._waiting) == ["target"]
+    assert not scheduler._running
+    return scheduler, target
+
+
+@pytest.mark.parametrize(
+    ("make_state", "finished_step"),
+    [(make_waiting, -1), (make_partial_prefill, 0), (make_decoding, 0), (make_preempted, 3)],
+)
+def test_aborting_a_request_in_any_state_frees_the_pool_and_keeps_cached_blocks(
+    make_state: Callable[[], tuple[Scheduler, Request]], finished_step: int
+) -> None:
+    scheduler, target = make_state()
+    pool = scheduler.kv_cache_manager.block_pool
+    cached_blocks = dict(pool._block_by_hash)
+    assert scheduler.finish_requests("target") == [target]
+    assert target.status is RequestStatus.FINISHED_ABORTED
+    assert target.finished_step == finished_step
+    assert not scheduler.has_unfinished_requests
+    assert pool.num_free_blocks == pool.num_blocks
+    assert pool._block_by_hash == cached_blocks
+    check_scheduler(scheduler)
+
+
+def test_requests_aborted_during_a_step_are_skipped_when_the_step_completes() -> None:
+    scheduler = make_scheduler()
+    kept, aborted, gone = (make_request(request_id) for request_id in ("kept", "aborted", "gone"))
+    for request in (kept, aborted, gone):
+        scheduler.add_request(request)
+    batch = scheduler.schedule()
+    assert scheduler.finish_requests("gone", "aborted") == [gone, aborted]
+    check_scheduler(scheduler)
+    assert aborted.finished_step == gone.finished_step == batch.step
+    retry = make_request("aborted")
+    scheduler.add_request(retry)
+    assert scheduler.complete_step(batch, {"kept": TOKEN, "aborted": EOS, "gone": EOS}) == []
+    check_scheduler(scheduler)
+    assert aborted.output_token_ids == gone.output_token_ids == []
+    assert kept.output_token_ids == [TOKEN]
+    assert retry.num_computed_tokens == 0
+    assert retry.status is RequestStatus.WAITING
+
+
+def test_finishing_with_a_live_status_or_unknown_ids_changes_nothing() -> None:
+    scheduler = make_scheduler(max_running_requests=1)
+    stopped, live = make_request("stopped"), make_request("live")
+    scheduler.add_request(stopped)
+    run_step(scheduler, {"stopped": EOS})
+    scheduler.add_request(live)
+    scheduler.add_request(make_request("waiting"))
+    run_step(scheduler)
+    before = snapshot(scheduler)
+    with pytest.raises(ValueError, match="RUNNING is not a finished status"):
+        scheduler.finish_requests("live", "waiting", status=RequestStatus.RUNNING)
+    assert scheduler.finish_requests("stopped", "unknown") == []
+    assert snapshot(scheduler) == before
+    assert scheduler.finish_requests("live", "live") == [live]
 
 
 def test_max_running_requests_caps_admission() -> None:

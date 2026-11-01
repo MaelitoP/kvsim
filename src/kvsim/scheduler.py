@@ -192,7 +192,9 @@ class Scheduler:
             raise ValueError(f"no sampled token for scheduled requests {sorted(missing)}")
         finished: list[Request] = []
         for request_id, num_new_tokens in batch.num_scheduled_tokens.items():
-            request = self._requests[request_id]
+            request = self._requests.get(request_id)
+            if request is None or request.status is not RequestStatus.RUNNING:
+                continue
             request.num_computed_tokens += num_new_tokens
             if request.num_computed_tokens < request.num_tokens:
                 continue
@@ -211,6 +213,25 @@ class Scheduler:
         if finished:
             self._running = [request for request in self._running if not request.is_finished]
         self._pending_batch = None
+        return finished
+
+    def finish_requests(
+        self, *request_ids: str, status: RequestStatus = RequestStatus.FINISHED_ABORTED
+    ) -> list[Request]:
+        if not status.is_finished:
+            raise ValueError(f"{status.name} is not a finished status")
+        finished: list[Request] = []
+        for request_id in request_ids:
+            request = self._requests.pop(request_id, None)
+            if request is None:
+                continue
+            if request.status is RequestStatus.RUNNING:
+                self._running.remove(request)
+            else:
+                self._waiting.remove(request)
+            request.finish(status, self.num_steps - 1)
+            self.kv_cache_manager.free(request)
+            finished.append(request)
         return finished
 
     def _preempt(self, request: Request) -> None:

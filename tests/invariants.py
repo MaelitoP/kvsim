@@ -64,12 +64,22 @@ def check_scheduler(scheduler: Scheduler) -> None:
     waiting = list(scheduler._waiting)
     running = scheduler._running
     if pending is not None:
-        assert set(scheduled) == set(request_ids(running))
+        assert tuple(scheduled) == (
+            *pending.scheduled_running,
+            *pending.scheduled_resumed,
+            *pending.scheduled_new,
+        )
+        running_ids = set(request_ids(running))
+        assert running_ids <= set(scheduled)
+        for request_id in set(scheduled) - running_ids:
+            readded = scheduler._requests.get(request_id)
+            assert readded is None or readded.status is RequestStatus.WAITING
         assert all(num_tokens >= 1 for num_tokens in scheduled.values())
         assert sum(scheduled.values()) <= scheduler.config.max_tokens_per_step
         if pending.preempted:
             assert pending.scheduled_resumed == pending.scheduled_new == ()
-            assert set(pending.preempted) <= set(request_ids(waiting))
+            live_victims = set(pending.preempted) & set(scheduler._requests)
+            assert live_victims <= set(request_ids(waiting))
     assert len(running) <= scheduler.config.max_running_requests
     assert len(waiting) + len(running) == len(scheduler._requests)
     assert set(request_ids(waiting + running)) == set(scheduler._requests)
