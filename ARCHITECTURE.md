@@ -7,7 +7,8 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 | Module | Responsibility | Owned state |
 | --- | --- | --- |
 | `block_pool.py` | Allocate, retain and release fixed-size blocks | Block objects, reference counts and free queue |
-| `request.py` | Store request inputs, progress and outcome | Prompt, generated tokens, status and timeline |
+| `block_hash.py` | Hash full blocks of tokens into a chain of prefix fingerprints | None |
+| `request.py` | Store request inputs, progress and outcome | Prompt, generated tokens, status, timeline and block hashes |
 | `kv_cache_manager.py` | Allocate blocks for each request | Block pool and request block tables |
 | `scheduler.py` | Build batches, preempt under memory pressure and apply sampled tokens | Waiting queue, running list, live request registry, pending batch and preemption total |
 
@@ -24,6 +25,12 @@ The free queue uses an `OrderedDict` for constant-time removal from the head, in
 `KVCacheManager(num_blocks, block_size)` requires both sizes to be positive. `allocate_slots(request, num_new_tokens)` reserves enough blocks for `request.num_computed_tokens + num_new_tokens`, rounded up by block size. The caller supplies a nonnegative count and advances computed tokens before allocating the next step. Existing block tables only grow until freed.
 
 An allocation returns the new blocks, possibly an empty list. It returns `None` without changing the pool or tables when capacity is insufficient. `free(request)` releases the entire table in reverse order, keeping earlier prompt blocks later in the free queue. Freeing a request without a table does nothing. `num_blocks_for`, `num_free_blocks` and `usage` report block counts and the fraction of allocated blocks.
+
+### Block hashes
+
+`hash_block_tokens(parent, token_ids)` returns the SHA-256 digest of the parent's 32-byte hash followed by the block's token IDs as little-endian 64-bit integers. The first block of a sequence uses `NONE_HASH`, 32 zero bytes, as its parent. A hash therefore fingerprints the whole prefix that ends with its block: for one block size, and barring SHA-256 collisions, two sequences share the hash of block `i` exactly when their first `i + 1` blocks hold the same tokens. `BlockHash` is a `NewType` over the digest bytes; a parent must be a real digest or `NONE_HASH`. The encoding is fixed, so the same tokens give the same hashes in every process and on every platform. Token IDs must fit in a signed 64-bit integer.
+
+`hash_full_blocks(block_size, token_ids, parent=NONE_HASH)` hashes every full block in order and skips a partial tail; `parent` continues an existing chain. `Request.block_hashes` holds the chain for the request's full blocks. `Request.update_block_hashes(block_size)` hashes only the blocks completed since the last call, chaining from the last known hash. Tokens are only ever appended, so a hash is never recomputed and the list only grows. Every call must pass the same block size, the cache's; nothing checks it, and a request that already has hashes is not fresh, so `add_request` rejects it. Nothing calls the method during scheduling yet; prefix caching will use the chain to find cached blocks.
 
 ### Request lifecycle
 
@@ -70,6 +77,7 @@ The caller supplies one sampled token per scheduled request, as a model samples 
 
 ## Current invariants and tests
 
+- After `update_block_hashes(block_size)` with the same block size on every call, a request's `block_hashes` equals `hash_full_blocks(block_size, all_token_ids)`: one hash per full block, none for a partial tail. Earlier hashes are the same objects as before the call.
 - The pool contains the same block objects throughout its lifetime. A block is free exactly when its reference count is zero and it appears in the free queue.
 - A block's reference count matches the request tables holding it. Requests do not share blocks yet.
 - A request table holds exactly enough blocks for its computed tokens plus the tokens reserved by the pending batch. Waiting, preempted and finished requests hold no blocks.
@@ -78,7 +86,7 @@ The caller supplies one sampled token per scheduled request, as a model samples 
 - A pending batch schedules every running request, at least one token each, within the token budget. A batch that preempts admits nothing, and its victims are in the waiting queue.
 - Between steps, a running request has at least one computed token and at least one uncomputed token. A running request that was never preempted and has output has `num_computed_tokens == num_tokens - 1`; the sampled token gets computed in the next step. Without output, it is in partial prefill. A resumed request may have output and still be recomputing.
 
-`tests/invariants.py` checks pool, table and queue state. Example tests cover allocation order, failure behavior, admission, chunking, preemption order, resumption, stopping and batch ownership. The scheduler test helper also checks every step against the expected transitions. The head of the running list is scheduled. Victims leave from the tail and return to the waiting head. A request appends exactly the sampled token in the step its computation completes, and no other request's output changes. Hypothesis exercises block reference operations, request-table growth, and scheduling with varied arrivals, EOS positions, budgets and chunking settings. Its pools are sized from the drawn prompts so that preemption is frequent. The scheduler property samples each token from the request's output position, checks that every request ends with the output that sampler implies, and has a step bound so stalled progress fails the test.
+`tests/invariants.py` checks pool, table and queue state. A pinned digest guards the hash encoding against accidental changes. Example tests cover allocation order, failure behavior, admission, chunking, preemption order, resumption, stopping and batch ownership. The scheduler test helper also checks every step against the expected transitions. The head of the running list is scheduled. Victims leave from the tail and return to the waiting head. A request appends exactly the sampled token in the step its computation completes, and no other request's output changes. Hypothesis exercises block reference operations, request-table growth, and scheduling with varied arrivals, EOS positions, budgets and chunking settings. Its pools are sized from the drawn prompts so that preemption is frequent. The scheduler property samples each token from the request's output position, checks that every request ends with the output that sampler implies, and has a step bound so stalled progress fails the test.
 
 ## vLLM references and differences
 
@@ -93,6 +101,8 @@ These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 | `ScheduledBatch`, `complete_step` | [`SchedulerOutput`, `update_from_output`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
 | `Scheduler._preempt`, `ScheduledBatch.preempted`, `scheduled_resumed` | [`_preempt_request`, `preempted_req_ids`, `scheduled_resumed_reqs`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
 | `add_request` longest-sequence check | [`verify_max_model_len`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/config/scheduler.py), [`_check_enough_kv_cache_memory`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_planning.py) |
+| `BlockHash`, `NONE_HASH`, `hash_block_tokens` | [Same names in `kv_cache_utils.py`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py) |
+| `hash_full_blocks`, `Request.update_block_hashes` | [`get_request_block_hasher`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py), [`Request.update_block_hashes`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/request.py) |
 | Discarded tokens of partial prefills | [`discard_request_mask` in the GPU model runner](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/worker/gpu_model_runner.py) |
 
 The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
@@ -103,11 +113,13 @@ vLLM guarantees that one request of `max_model_len` tokens fits: startup fails w
 
 Preemption follows vLLM's FCFS policy: the victim is the last running request, and the waiting loop is skipped after a preemption. vLLM's scheduler keeps no preemption total: requests carry `num_preemptions`, and the metrics loggers sum per-iteration counts into `vllm:num_preemptions_total`. The lab keeps `Scheduler.num_preemptions` because finished requests leave the registry and there is no metrics layer yet.
 
+vLLM hashes the pickled or CBOR-encoded tuple `(parent, token_ids, extra_keys)`, and derives `NONE_HASH` from a seed: a fixed default with SHA-256, `PYTHONHASHSEED` when set, a random one for the non-cryptographic hashes. The lab hashes a fixed binary encoding, has no extra keys (LoRA, multimodal inputs, cache salt) and uses 32 zero bytes as `NONE_HASH`. vLLM's hashing functions take `None` for the first block's parent; the lab passes `NONE_HASH` itself. vLLM gives each request a hasher at construction and extends `block_hashes` whenever an output token is appended; the lab's request does not know the block size, so its owner calls `update_block_hashes`.
+
 vLLM accepts `long_prefill_token_threshold` with chunked prefill off and still caps admitted prompts by it; the lab rejects that configuration. The lab has no adaptive threshold (`long_prefill_token_threshold_adaptive`).
 
 ## Planned features
 
-- **M10, prefix caching:** hash full blocks with chained parent hashes, share cached prefixes, and remove hash entries on eviction. Admission lookup covers at most `num_tokens - 1` tokens so some computation remains.
+- **Prefix caching:** register hashed full blocks in the pool, evict the least recently freed, share cached prefixes on admission, and remove hash entries on eviction. Admission lookup covers at most `num_tokens - 1` tokens so some computation remains.
 - **Abort, workloads and metrics:** add request cancellation, deterministic workload replay, traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

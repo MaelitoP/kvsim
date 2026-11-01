@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from kvsim.block_hash import NONE_HASH, BlockHash, hash_full_blocks
+
 
 class RequestStatus(Enum):
     WAITING = auto()
@@ -34,6 +36,7 @@ class Request:
     first_token_step: int | None = field(init=False, default=None)
     finished_step: int | None = field(init=False, default=None)
     num_preemptions: int = field(init=False, default=0)
+    block_hashes: list[BlockHash] = field(init=False, default_factory=list, repr=False)
 
     @property
     def all_token_ids(self) -> tuple[int, ...]:
@@ -57,6 +60,15 @@ class Request:
 
     def append_output_token(self, token_id: int) -> None:
         self.output_token_ids.append(token_id)
+
+    def update_block_hashes(self, block_size: int) -> None:
+        start = len(self.block_hashes) * block_size
+        if start + block_size > self.num_tokens:
+            return
+        parent = self.block_hashes[-1] if self.block_hashes else NONE_HASH
+        self.block_hashes.extend(
+            hash_full_blocks(block_size, self.all_token_ids[start:], parent=parent)
+        )
 
     def finish(self, status: RequestStatus, step: int) -> None:
         if not status.is_finished:

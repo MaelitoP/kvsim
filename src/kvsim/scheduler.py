@@ -71,6 +71,7 @@ class Scheduler:
             request.status is not RequestStatus.WAITING
             or request.num_computed_tokens != 0
             or request.output_token_ids
+            or request.block_hashes
         ):
             raise ValueError(f"request {request.request_id} is not a fresh waiting request")
         if request.num_prompt_tokens < 1 or request.max_output_tokens < 1:

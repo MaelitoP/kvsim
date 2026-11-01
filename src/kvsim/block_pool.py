@@ -2,12 +2,14 @@ from collections import OrderedDict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
+from kvsim.block_hash import BlockHash
+
 
 @dataclass(eq=False)
 class KVCacheBlock:
     block_id: int
     ref_count: int = 0
-    block_hash: bytes | None = None
+    block_hash: BlockHash | None = None
 
 
 class FreeBlockQueue:

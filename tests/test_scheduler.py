@@ -150,6 +150,10 @@ def test_add_request_rejects_requests_that_could_never_run() -> None:
     stale.num_computed_tokens = 2
     with pytest.raises(ValueError, match="stale is not a fresh waiting request"):
         scheduler.add_request(stale)
+    hashed = make_request("hashed", max_output_tokens=1)
+    hashed.update_block_hashes(BLOCK_SIZE)
+    with pytest.raises(ValueError, match="hashed is not a fresh waiting request"):
+        scheduler.add_request(hashed)
     assert list(scheduler._requests) == ["r0"]
     check_scheduler(scheduler)
 
