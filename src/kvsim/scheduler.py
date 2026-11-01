@@ -34,12 +34,14 @@ class SchedulerConfig:
 
 @dataclass(frozen=True)
 class ScheduledBatch:
-    """Lists running requests before requests admitted in this step."""
+    """Token counts list running, then resumed, then new requests; `preempted` is youngest first."""
 
     step: int
     num_scheduled_tokens: Mapping[str, int]
     scheduled_running: tuple[str, ...]
+    scheduled_resumed: tuple[str, ...]
     scheduled_new: tuple[str, ...]
+    preempted: tuple[str, ...]
 
     @property
     def total_tokens(self) -> int:
@@ -54,6 +56,7 @@ class Scheduler:
         self._requests: dict[str, Request] = {}
         self.kv_cache_manager = KVCacheManager(config.num_blocks, config.block_size)
         self.num_steps = 0
+        self.num_preemptions = 0
         self._pending_batch: ScheduledBatch | None = None
 
     @property
@@ -72,15 +75,16 @@ class Scheduler:
             raise ValueError(f"request {request.request_id} is not a fresh waiting request")
         if request.num_prompt_tokens < 1 or request.max_output_tokens < 1:
             raise ValueError(f"request {request.request_id} needs a prompt and an output token")
+        max_num_computed_tokens = request.num_prompt_tokens + request.max_output_tokens - 1
         if (
             not self.config.enable_chunked_prefill
-            and request.num_prompt_tokens > self.config.max_tokens_per_step
+            and max_num_computed_tokens > self.config.max_tokens_per_step
         ):
             raise ValueError(
-                f"request {request.request_id} has {request.num_prompt_tokens} prompt tokens, "
+                f"request {request.request_id} can compute {max_num_computed_tokens} tokens, "
                 f"more than the budget of {self.config.max_tokens_per_step}"
             )
-        num_blocks = -(-request.num_prompt_tokens // self.config.block_size)
+        num_blocks = -(-max_num_computed_tokens // self.config.block_size)
         if num_blocks > self.config.num_blocks:
             raise ValueError(
                 f"request {request.request_id} needs {num_blocks} blocks, "
@@ -101,24 +105,35 @@ class Scheduler:
         )
         num_scheduled_tokens: dict[str, int] = {}
         scheduled_running: list[str] = []
+        scheduled_resumed: list[str] = []
         scheduled_new: list[str] = []
+        preempted: list[str] = []
 
-        for request in self._running:
+        index = 0
+        while index < len(self._running):
+            request = self._running[index]
             num_new_tokens = min(
                 request.num_tokens - request.num_computed_tokens,
                 max_tokens_per_request,
                 token_budget,
             )
-            if self.kv_cache_manager.allocate_slots(request, num_new_tokens) is None:
-                raise RuntimeError(
-                    f"out of KV cache blocks for running request {request.request_id}"
-                )
+            while (
+                request.status is RequestStatus.RUNNING
+                and self.kv_cache_manager.allocate_slots(request, num_new_tokens) is None
+            ):
+                victim = self._running.pop()
+                self._preempt(victim)
+                preempted.append(victim.request_id)
+            if request.status is RequestStatus.PREEMPTED:
+                break
             num_scheduled_tokens[request.request_id] = num_new_tokens
             scheduled_running.append(request.request_id)
             token_budget -= num_new_tokens
+            index += 1
 
         while (
-            self._waiting
+            not preempted
+            and self._waiting
             and token_budget > 0
             and len(self._running) < self.config.max_running_requests
         ):
@@ -131,11 +146,13 @@ class Scheduler:
                 break
             self._waiting.popleft()
             self._running.append(request)
-            request.status = RequestStatus.RUNNING
-            if request.first_scheduled_step is None:
+            if request.status is RequestStatus.PREEMPTED:
+                scheduled_resumed.append(request.request_id)
+            else:
                 request.first_scheduled_step = step
+                scheduled_new.append(request.request_id)
+            request.status = RequestStatus.RUNNING
             num_scheduled_tokens[request.request_id] = num_new_tokens
-            scheduled_new.append(request.request_id)
             token_budget -= num_new_tokens
 
         self.num_steps += 1
@@ -143,7 +160,9 @@ class Scheduler:
             step=step,
             num_scheduled_tokens=MappingProxyType(num_scheduled_tokens.copy()),
             scheduled_running=tuple(scheduled_running),
+            scheduled_resumed=tuple(scheduled_resumed),
             scheduled_new=tuple(scheduled_new),
+            preempted=tuple(preempted),
         )
         self._pending_batch = batch
         return batch
@@ -178,3 +197,11 @@ class Scheduler:
             self._running = [request for request in self._running if not request.is_finished]
         self._pending_batch = None
         return finished
+
+    def _preempt(self, request: Request) -> None:
+        self.kv_cache_manager.free(request)
+        request.status = RequestStatus.PREEMPTED
+        request.num_computed_tokens = 0
+        request.num_preemptions += 1
+        self.num_preemptions += 1
+        self._waiting.appendleft(request)

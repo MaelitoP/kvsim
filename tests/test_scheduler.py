@@ -18,6 +18,7 @@ BLOCK_SIZE = 4
 MAX_PROMPT = 20
 MAX_OUTPUT = 4
 MAX_REQUESTS = 12
+MAX_COMPUTED_TOKENS = MAX_PROMPT + MAX_OUTPUT - 1
 
 
 def make_request(
@@ -77,15 +78,34 @@ def run_step(
 ) -> tuple[ScheduledBatch, list[Request]]:
     running_before = request_ids(scheduler._running)
     waiting_before = request_ids(scheduler._waiting)
+    requests = dict(scheduler._requests)
+    outputs_before = {
+        request_id: list(request.output_token_ids) for request_id, request in requests.items()
+    }
     batch = scheduler.schedule()
     check_scheduler(scheduler)
-    assert batch.scheduled_running == tuple(running_before)
-    assert batch.scheduled_new == tuple(waiting_before[: len(batch.scheduled_new)])
-    assert list(batch.num_scheduled_tokens) == [*batch.scheduled_running, *batch.scheduled_new]
+    assert batch.scheduled_running[:1] == tuple(running_before[:1])
+    assert (*batch.scheduled_running, *batch.preempted[::-1]) == tuple(running_before)
+    admitted = (*batch.scheduled_resumed, *batch.scheduled_new)
+    assert admitted == tuple(waiting_before[: len(admitted)])
+    assert request_ids(scheduler._waiting) == [
+        *batch.preempted[::-1],
+        *waiting_before[len(admitted) :],
+    ]
+    assert tuple(batch.num_scheduled_tokens) == (*batch.scheduled_running, *admitted)
+    completing = {
+        request_id
+        for request_id, num_new_tokens in batch.num_scheduled_tokens.items()
+        if requests[request_id].num_computed_tokens + num_new_tokens
+        == requests[request_id].num_tokens
+    }
     if sampled_token_ids is None:
         sampled_token_ids = dict.fromkeys(batch.num_scheduled_tokens, TOKEN)
     finished = scheduler.complete_step(batch, sampled_token_ids)
     check_scheduler(scheduler)
+    for request_id, request in requests.items():
+        sampled = [sampled_token_ids[request_id]] if request_id in completing else []
+        assert request.output_token_ids == outputs_before[request_id] + sampled
     return batch, finished
 
 
@@ -115,13 +135,13 @@ def test_config_rejects_invalid_settings(
 
 def test_add_request_rejects_requests_that_could_never_run() -> None:
     scheduler = make_scheduler(num_blocks=1, max_tokens_per_step=8, enable_chunked_prefill=False)
-    scheduler.add_request(make_request("r0"))
+    scheduler.add_request(make_request("r0", max_output_tokens=1))
     with pytest.raises(ValueError, match="r0 is already WAITING"):
         scheduler.add_request(make_request("r0"))
-    with pytest.raises(ValueError, match="9 prompt tokens, more than the budget of 8"):
-        scheduler.add_request(make_request("r1", num_prompt_tokens=9))
-    with pytest.raises(ValueError, match="too_wide needs 2 blocks, the cache holds 1"):
-        scheduler.add_request(make_request("too_wide", num_prompt_tokens=5))
+    with pytest.raises(ValueError, match="long can compute 9 tokens, more than the budget of 8"):
+        scheduler.add_request(make_request("long", num_prompt_tokens=4, max_output_tokens=6))
+    with pytest.raises(ValueError, match="grows needs 2 blocks, the cache holds 1"):
+        scheduler.add_request(make_request("grows", num_prompt_tokens=4, max_output_tokens=2))
     with pytest.raises(ValueError, match="needs a prompt and an output token"):
         scheduler.add_request(make_request("empty", num_prompt_tokens=0))
     with pytest.raises(ValueError, match="needs a prompt and an output token"):
@@ -213,7 +233,7 @@ def test_running_requests_are_served_before_waiting_ones_in_fcfs_order() -> None
     scheduler = make_scheduler(max_tokens_per_step=10, enable_chunked_prefill=False)
     scheduler.add_request(make_request("decoding", num_prompt_tokens=4))
     run_step(scheduler)
-    scheduler.add_request(make_request("big", num_prompt_tokens=10))
+    scheduler.add_request(make_request("big", num_prompt_tokens=10, max_output_tokens=1))
     scheduler.add_request(make_request("small", num_prompt_tokens=2))
     batch, _ = run_step(scheduler, {"decoding": EOS})
     assert list(batch.num_scheduled_tokens.items()) == [("decoding", 1)]
@@ -221,7 +241,7 @@ def test_running_requests_are_served_before_waiting_ones_in_fcfs_order() -> None
     batch, _ = run_step(scheduler)
     assert list(batch.num_scheduled_tokens.items()) == [("big", 10)]
     batch, _ = run_step(scheduler)
-    assert list(batch.num_scheduled_tokens.items()) == [("big", 1), ("small", 2)]
+    assert list(batch.num_scheduled_tokens.items()) == [("small", 2)]
 
 
 def test_a_long_prompt_is_chunked_behind_decodes_and_samples_after_its_last_chunk() -> None:
@@ -252,18 +272,80 @@ def test_long_prefill_threshold_caps_chunks_while_other_requests_exist() -> None
     ]
 
 
-def test_chunked_admission_reserves_only_the_first_chunk_and_can_exhaust_the_cache() -> None:
-    scheduler = make_scheduler(num_blocks=4, max_tokens_per_step=4)
-    scheduler.add_request(make_request("held", num_prompt_tokens=4, max_output_tokens=100))
+@pytest.mark.parametrize("enable_chunked_prefill", [True, False])
+def test_the_youngest_running_request_is_preempted_first_and_resumes_at_the_queue_head(
+    enable_chunked_prefill: bool,
+) -> None:
+    scheduler = make_scheduler(num_blocks=3, enable_chunked_prefill=enable_chunked_prefill)
+    for request_id in ("old", "middle", "young"):
+        scheduler.add_request(make_request(request_id))
     run_step(scheduler)
-    scheduler.add_request(make_request("long", num_prompt_tokens=16))
-    batches = [run_step(scheduler)[0] for _ in range(2)]
+    scheduler.add_request(make_request("late", num_prompt_tokens=1, max_output_tokens=1))
+    batch, _ = run_step(scheduler)
+    assert list(batch.num_scheduled_tokens.items()) == [("old", 1)]
+    assert batch.preempted == ("young", "middle")
+    assert request_ids(scheduler._waiting) == ["middle", "young", "late"]
+    for request in list(scheduler._waiting)[:2]:
+        assert request.status is RequestStatus.PREEMPTED
+        assert request.num_preemptions == 1
+        assert request.output_token_ids == [TOKEN]
+        assert request.first_token_step == 0
+    assert scheduler.num_preemptions == 2
+    batches = [run_step(scheduler)[0] for _ in range(6)]
     assert [list(batch.num_scheduled_tokens.items()) for batch in batches] == [
-        [("held", 1), ("long", 3)]
-    ] * 2
-    assert scheduler.kv_cache_manager.num_free_blocks == 0
-    with pytest.raises(RuntimeError, match="out of KV cache blocks for running request long"):
-        scheduler.schedule()
+        [("old", 1)],
+        [("old", 1)],
+        [("middle", 5)],
+        [("middle", 1)],
+        [("middle", 1)],
+        [("young", 5), ("late", 1)],
+    ]
+    assert batches[2].scheduled_resumed == ("middle",)
+    assert batches[-1].scheduled_resumed == ("young",)
+    assert batches[-1].scheduled_new == ("late",)
+
+
+def test_a_request_in_partial_prefill_can_be_preempted_and_restarts_from_zero() -> None:
+    scheduler = make_scheduler(num_blocks=4, max_tokens_per_step=4)
+    scheduler.add_request(make_request("held", num_prompt_tokens=4))
+    run_step(scheduler)
+    long = make_request("long", num_prompt_tokens=16, max_output_tokens=1)
+    scheduler.add_request(long)
+    batches = [run_step(scheduler)[0] for _ in range(7)]
+    assert [(list(batch.num_scheduled_tokens.items()), batch.preempted) for batch in batches] == [
+        ([("held", 1), ("long", 3)], ()),
+        ([("held", 1), ("long", 3)], ()),
+        ([("held", 1)], ("long",)),
+        ([("long", 4)], ()),
+        ([("long", 4)], ()),
+        ([("long", 4)], ()),
+        ([("long", 4)], ()),
+    ]
+    assert batches[3].scheduled_resumed == ("long",)
+    assert long.num_preemptions == 1
+    assert long.first_scheduled_step == 1
+    assert long.first_token_step == long.finished_step == 7
+
+
+def test_a_resumed_request_keeps_its_output_and_samples_after_its_last_recompute_chunk() -> None:
+    scheduler = make_scheduler(num_blocks=3, long_prefill_token_threshold=2)
+    young = make_request("young")
+    scheduler.add_request(make_request("old"))
+    scheduler.add_request(young)
+    batches: list[ScheduledBatch] = []
+    outputs: list[list[int]] = []
+    for _ in range(6):
+        batches.append(run_step(scheduler)[0])
+        outputs.append(list(young.output_token_ids))
+    assert [(list(batch.num_scheduled_tokens.items()), batch.preempted) for batch in batches] == [
+        ([("old", 2), ("young", 2)], ()),
+        ([("old", 2), ("young", 2)], ()),
+        ([("old", 1)], ("young",)),
+        ([("old", 1), ("young", 2)], ()),
+        ([("old", 1), ("young", 2)], ()),
+        ([("young", 1)], ()),
+    ]
+    assert outputs[2:] == [[TOKEN], [TOKEN], [TOKEN], [TOKEN, TOKEN]]
 
 
 def test_max_running_requests_caps_admission() -> None:
@@ -281,7 +363,7 @@ def test_max_running_requests_caps_admission() -> None:
 
 def test_a_waiting_request_that_does_not_fit_the_pool_blocks_the_queue() -> None:
     scheduler = make_scheduler(num_blocks=4)
-    scheduler.add_request(make_request("held", num_prompt_tokens=8, max_output_tokens=100))
+    scheduler.add_request(make_request("held", num_prompt_tokens=8))
     run_step(scheduler)
     scheduler.add_request(make_request("big", num_prompt_tokens=5))
     scheduler.add_request(make_request("small", num_prompt_tokens=1))
@@ -289,14 +371,6 @@ def test_a_waiting_request_that_does_not_fit_the_pool_blocks_the_queue() -> None
     assert list(batch.num_scheduled_tokens.items()) == [("held", 1)]
     assert request_ids(scheduler._waiting) == ["big", "small"]
     assert scheduler.kv_cache_manager.num_free_blocks == 1
-
-
-def test_a_running_request_that_cannot_grow_raises() -> None:
-    scheduler = make_scheduler(num_blocks=1)
-    scheduler.add_request(make_request("r0", num_prompt_tokens=4, max_output_tokens=100))
-    run_step(scheduler)
-    with pytest.raises(RuntimeError, match="out of KV cache blocks for running request r0"):
-        scheduler.schedule()
 
 
 def test_every_step_needs_exactly_one_update_with_every_sampled_token() -> None:
@@ -378,22 +452,27 @@ def test_requests_added_during_a_pending_batch_wait_until_the_next_step() -> Non
 
 @given(
     prompts=st.lists(st.integers(1, MAX_PROMPT), min_size=1, max_size=MAX_REQUESTS),
+    eos_positions=st.lists(
+        st.integers(0, MAX_OUTPUT), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS
+    ),
     arrivals=st.lists(st.integers(0, 3), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
-    stops=st.lists(st.booleans(), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
-    max_running_requests=st.integers(1, 4),
-    prefill=st.tuples(st.just(False), st.integers(MAX_PROMPT, 2 * MAX_PROMPT), st.just(0))
+    max_running_requests=st.integers(2, 4),
+    num_spare_blocks=st.integers(0, 2),
+    prefill=st.tuples(st.just(False), st.integers(MAX_COMPUTED_TOKENS, 2 * MAX_PROMPT), st.just(0))
     | st.tuples(st.just(True), st.integers(1, 2 * MAX_PROMPT), st.integers(0, MAX_PROMPT)),
 )
-def test_limits_hold_and_every_request_finishes(
+def test_limits_hold_and_every_request_finishes_with_its_expected_output(
     prompts: list[int],
+    eos_positions: list[int],
     arrivals: list[int],
-    stops: list[bool],
     max_running_requests: int,
+    num_spare_blocks: int,
     prefill: tuple[bool, int, int],
 ) -> None:
     enable_chunked_prefill, max_tokens_per_step, long_prefill_token_threshold = prefill
+    max_computed_tokens = [prompt + MAX_OUTPUT - 1 for prompt in prompts]
     scheduler = make_scheduler(
-        num_blocks=max_running_requests * math.ceil((MAX_PROMPT + MAX_OUTPUT) / BLOCK_SIZE),
+        num_blocks=math.ceil(max(max_computed_tokens) / BLOCK_SIZE) + num_spare_blocks,
         max_running_requests=max_running_requests,
         max_tokens_per_step=max_tokens_per_step,
         enable_chunked_prefill=enable_chunked_prefill,
@@ -402,32 +481,40 @@ def test_limits_hold_and_every_request_finishes(
     requests = [
         make_request(f"r{index}", num_prompt_tokens=prompt) for index, prompt in enumerate(prompts)
     ]
+    eos_position = {f"r{index}": eos for index, eos in enumerate(eos_positions)}
     pending = deque(requests)
-    step = 0
+    batches: list[ScheduledBatch] = []
     while pending or scheduler.has_unfinished_requests:
-        assert step < sum(prompts) + MAX_OUTPUT * len(requests)
-        num_arrivals = arrivals[step % len(arrivals)]
+        assert len(batches) < sum(max_computed_tokens)
+        num_arrivals = arrivals[len(batches) % len(arrivals)]
         if not scheduler.has_unfinished_requests:
             num_arrivals = max(num_arrivals, 1)
         for _ in range(min(num_arrivals, len(pending))):
             scheduler.add_request(pending.popleft())
         check_scheduler(scheduler)
-        batch, _ = (
-            run_step(scheduler)
-            if not stops[step % len(stops)]
-            else run_step(
-                scheduler,
-                dict.fromkeys(request_ids(scheduler._running + list(scheduler._waiting)), EOS),
-            )
+        batch, _ = run_step(
+            scheduler,
+            {
+                request_id: EOS
+                if request.num_output_tokens == eos_position[request_id]
+                else TOKEN + request.num_output_tokens
+                for request_id, request in scheduler._requests.items()
+            },
         )
-        assert batch.step == step
-        step += 1
+        assert batch.step == len(batches)
+        batches.append(batch)
     assert scheduler.kv_cache_manager.usage == 0.0
+    assert scheduler.num_preemptions == sum(request.num_preemptions for request in requests)
+    assert scheduler.num_preemptions == sum(len(batch.preempted) for batch in batches)
     for request in requests:
-        assert request.is_finished
+        num_tokens = min(eos_position[request.request_id], MAX_OUTPUT)
+        expected = [TOKEN + position for position in range(num_tokens)]
+        if num_tokens < MAX_OUTPUT:
+            expected.append(EOS)
+        assert request.output_token_ids == expected
         assert request.num_computed_tokens == request.num_tokens - 1
-        assert request.output_token_ids[:-1] == [TOKEN] * (len(request.output_token_ids) - 1)
-        if request.status is RequestStatus.FINISHED_LENGTH_CAPPED:
-            assert request.output_token_ids == [TOKEN] * MAX_OUTPUT
-        else:
-            assert request.output_token_ids[-1] == EOS
+        assert request.status is (
+            RequestStatus.FINISHED_STOPPED
+            if expected[-1] == EOS
+            else RequestStatus.FINISHED_LENGTH_CAPPED
+        )
