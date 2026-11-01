@@ -4,8 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from invariants import block_ids, check_manager
-from kvsim.block_hash import BlockHash
+from invariants import block_ids, check_manager, manager_state
 from kvsim.block_pool import KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
 from kvsim.request import Request
@@ -17,23 +16,6 @@ def make_request(request_id: str = "r0", prompt_token_ids: tuple[int, ...] = (1,
         prompt_token_ids=prompt_token_ids,
         max_output_tokens=8,
         arrival_step=0,
-    )
-
-
-Snapshot = tuple[
-    list[tuple[int, BlockHash | None]], list[int], dict[str, list[int]], dict[str, int]
-]
-
-
-def snapshot(manager: KVCacheManager) -> Snapshot:
-    return (
-        [(block.ref_count, block.block_hash) for block in manager.block_pool._blocks],
-        block_ids(manager.block_pool._free_queue),
-        {
-            request_id: block_ids(blocks)
-            for request_id, blocks in manager._blocks_by_request.items()
-        },
-        dict(manager._num_cached_blocks),
     )
 
 
@@ -73,11 +55,11 @@ def test_failed_allocation_and_unknown_free_leave_pool_and_tables_unchanged() ->
     running = make_request("running")
     assert manager.allocate_slots(running, num_new_tokens=4) is not None
     running.num_computed_tokens = 4
-    before = snapshot(manager)
+    before = manager_state(manager)
     assert manager.allocate_slots(running, num_new_tokens=8) is None
     assert manager.allocate_slots(make_request("waiting"), num_new_tokens=9) is None
     manager.free(make_request("waiting"))
-    assert snapshot(manager) == before
+    assert manager_state(manager) == before
     assert "waiting" not in manager._blocks_by_request
     check_manager(manager)
 
@@ -127,9 +109,9 @@ def test_free_hit_blocks_count_against_capacity() -> None:
     longer = make_request("longer", tuple(range(20)))
     computed_blocks = manager.get_computed_blocks(longer)
     assert len(computed_blocks) == 4
-    before = snapshot(manager)
+    before = manager_state(manager)
     assert manager.allocate_slots(longer, 4, computed_blocks) is None
-    assert snapshot(manager) == before
+    assert manager_state(manager) == before
     check_manager(manager)
 
 
@@ -177,13 +159,13 @@ def test_requests_grow_by_ceil_and_never_share_blocks(
             manager.free(request)
             request.num_computed_tokens = 0
         else:
-            before = snapshot(manager)
-            held = before[2].get(request.request_id, [])
+            before = manager_state(manager)
+            held = before.block_tables.get(request.request_id, [])
             required = math.ceil((request.num_computed_tokens + num_new_tokens) / block_size)
             new_blocks = manager.allocate_slots(request, num_new_tokens)
             if new_blocks is None:
                 assert required - len(held) > manager.num_free_blocks
-                assert snapshot(manager) == before
+                assert manager_state(manager) == before
             else:
                 request.num_computed_tokens += num_new_tokens
                 assert len(held) + len(new_blocks) == required

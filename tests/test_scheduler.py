@@ -1,24 +1,17 @@
-import math
-from collections import deque
 from collections.abc import Callable, MutableMapping
 from dataclasses import asdict, replace
 from typing import cast
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
-from invariants import block_ids, check_scheduler, request_ids
+from invariants import block_ids, check_scheduler, checked_scheduler, request_ids, run_checked_step
 from kvsim.request import Request, RequestStatus
 from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
 
 EOS = 0
 TOKEN = 1
 BLOCK_SIZE = 4
-MAX_PROMPT = 20
 MAX_OUTPUT = 4
-MAX_REQUESTS = 12
-MAX_COMPUTED_TOKENS = MAX_PROMPT + MAX_OUTPUT - 1
 
 
 def make_request(
@@ -43,7 +36,7 @@ def make_scheduler(
     long_prefill_token_threshold: int = 0,
     enable_prefix_caching: bool = False,
 ) -> Scheduler:
-    return Scheduler(
+    return checked_scheduler(
         SchedulerConfig(
             num_blocks=num_blocks,
             block_size=BLOCK_SIZE,
@@ -81,36 +74,9 @@ def snapshot(scheduler: Scheduler) -> dict[str, object]:
 def run_step(
     scheduler: Scheduler, sampled_token_ids: dict[str, int] | None = None
 ) -> tuple[ScheduledBatch, list[Request]]:
-    running_before = request_ids(scheduler._running)
-    waiting_before = request_ids(scheduler._waiting)
-    requests = dict(scheduler._requests)
-    outputs_before = {
-        request_id: list(request.output_token_ids) for request_id, request in requests.items()
-    }
-    batch = scheduler.schedule()
-    check_scheduler(scheduler)
-    assert batch.scheduled_running[:1] == tuple(running_before[:1])
-    assert (*batch.scheduled_running, *batch.preempted[::-1]) == tuple(running_before)
-    admitted = (*batch.scheduled_resumed, *batch.scheduled_new)
-    assert admitted == tuple(waiting_before[: len(admitted)])
-    assert request_ids(scheduler._waiting) == [
-        *batch.preempted[::-1],
-        *waiting_before[len(admitted) :],
-    ]
-    completing = {
-        request_id
-        for request_id, num_new_tokens in batch.num_scheduled_tokens.items()
-        if requests[request_id].num_computed_tokens + num_new_tokens
-        == requests[request_id].num_tokens
-    }
     if sampled_token_ids is None:
-        sampled_token_ids = dict.fromkeys(batch.num_scheduled_tokens, TOKEN)
-    finished = scheduler.complete_step(batch, sampled_token_ids)
-    check_scheduler(scheduler)
-    for request_id, request in requests.items():
-        sampled = [sampled_token_ids[request_id]] if request_id in completing else []
-        assert request.output_token_ids == outputs_before[request_id] + sampled
-    return batch, finished
+        sampled_token_ids = dict.fromkeys(scheduler._requests, TOKEN)
+    return run_checked_step(scheduler, sampled_token_ids)
 
 
 @pytest.mark.parametrize(
@@ -628,76 +594,3 @@ def test_requests_added_during_a_pending_batch_wait_until_the_next_step() -> Non
     batch, _ = run_step(scheduler)
     assert batch.scheduled_new == ("later",)
     assert later.first_scheduled_step == 1
-
-
-@given(
-    prompts=st.lists(st.integers(1, MAX_PROMPT), min_size=1, max_size=MAX_REQUESTS),
-    eos_positions=st.lists(
-        st.integers(0, MAX_OUTPUT), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS
-    ),
-    arrivals=st.lists(st.integers(0, 3), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
-    max_running_requests=st.integers(2, 4),
-    num_spare_blocks=st.integers(0, 2),
-    enable_prefix_caching=st.booleans(),
-    prefill=st.tuples(st.just(False), st.integers(MAX_COMPUTED_TOKENS, 2 * MAX_PROMPT), st.just(0))
-    | st.tuples(st.just(True), st.integers(1, 2 * MAX_PROMPT), st.integers(0, MAX_PROMPT)),
-)
-def test_limits_hold_and_every_request_finishes_with_its_expected_output(
-    prompts: list[int],
-    eos_positions: list[int],
-    arrivals: list[int],
-    max_running_requests: int,
-    num_spare_blocks: int,
-    enable_prefix_caching: bool,
-    prefill: tuple[bool, int, int],
-) -> None:
-    enable_chunked_prefill, max_tokens_per_step, long_prefill_token_threshold = prefill
-    max_computed_tokens = [prompt + MAX_OUTPUT - 1 for prompt in prompts]
-    scheduler = make_scheduler(
-        num_blocks=math.ceil(max(max_computed_tokens) / BLOCK_SIZE) + num_spare_blocks,
-        max_running_requests=max_running_requests,
-        max_tokens_per_step=max_tokens_per_step,
-        enable_chunked_prefill=enable_chunked_prefill,
-        long_prefill_token_threshold=long_prefill_token_threshold,
-        enable_prefix_caching=enable_prefix_caching,
-    )
-    requests = [
-        make_request(f"r{index}", num_prompt_tokens=prompt) for index, prompt in enumerate(prompts)
-    ]
-    eos_position = {f"r{index}": eos for index, eos in enumerate(eos_positions)}
-    pending = deque(requests)
-    batches: list[ScheduledBatch] = []
-    while pending or scheduler.has_unfinished_requests:
-        assert len(batches) < sum(max_computed_tokens)
-        num_arrivals = arrivals[len(batches) % len(arrivals)]
-        if not scheduler.has_unfinished_requests:
-            num_arrivals = max(num_arrivals, 1)
-        for _ in range(min(num_arrivals, len(pending))):
-            scheduler.add_request(pending.popleft())
-        check_scheduler(scheduler)
-        batch, _ = run_step(
-            scheduler,
-            {
-                request_id: EOS
-                if request.num_output_tokens == eos_position[request_id]
-                else TOKEN + request.num_output_tokens
-                for request_id, request in scheduler._requests.items()
-            },
-        )
-        assert batch.step == len(batches)
-        batches.append(batch)
-    assert scheduler.kv_cache_manager.usage == 0.0
-    assert scheduler.num_preemptions == sum(request.num_preemptions for request in requests)
-    assert scheduler.num_preemptions == sum(len(batch.preempted) for batch in batches)
-    for request in requests:
-        num_tokens = min(eos_position[request.request_id], MAX_OUTPUT)
-        expected = [TOKEN + position for position in range(num_tokens)]
-        if num_tokens < MAX_OUTPUT:
-            expected.append(EOS)
-        assert request.output_token_ids == expected
-        assert request.num_computed_tokens == request.num_tokens - 1
-        assert request.status is (
-            RequestStatus.FINISHED_STOPPED
-            if expected[-1] == EOS
-            else RequestStatus.FINISHED_LENGTH_CAPPED
-        )

@@ -1,12 +1,20 @@
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from typing import NamedTuple, override
 
-from kvsim.block_hash import hash_full_blocks
+from kvsim.block_hash import BlockHash, hash_full_blocks
 from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
 from kvsim.request import Request, RequestStatus
-from kvsim.scheduler import Scheduler
+from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
+
+
+class ManagerState(NamedTuple):
+    blocks: list[tuple[int, BlockHash | None]]
+    free_queue: list[int]
+    block_tables: dict[str, list[int]]
+    num_cached_blocks: dict[str, int]
 
 
 def block_ids(blocks: Iterable[KVCacheBlock]) -> list[int]:
@@ -15,6 +23,42 @@ def block_ids(blocks: Iterable[KVCacheBlock]) -> list[int]:
 
 def request_ids(requests: Iterable[Request]) -> list[str]:
     return [request.request_id for request in requests]
+
+
+def manager_state(manager: KVCacheManager) -> ManagerState:
+    return ManagerState(
+        blocks=[(block.ref_count, block.block_hash) for block in manager.block_pool._blocks],
+        free_queue=block_ids(manager.block_pool._free_queue),
+        block_tables={
+            request_id: block_ids(blocks)
+            for request_id, blocks in manager._blocks_by_request.items()
+        },
+        num_cached_blocks=dict(manager._num_cached_blocks),
+    )
+
+
+class CheckedKVCacheManager(KVCacheManager):
+    @override
+    def allocate_slots(
+        self,
+        request: Request,
+        num_new_tokens: int,
+        new_computed_blocks: Sequence[KVCacheBlock] = (),
+    ) -> list[KVCacheBlock] | None:
+        before = manager_state(self)
+        new_blocks = super().allocate_slots(request, num_new_tokens, new_computed_blocks)
+        if new_blocks is None:
+            assert manager_state(self) == before
+        return new_blocks
+
+
+def checked_scheduler(config: SchedulerConfig) -> Scheduler:
+    scheduler = Scheduler(config)
+    manager = scheduler.kv_cache_manager
+    scheduler.kv_cache_manager = CheckedKVCacheManager(
+        manager.num_blocks, manager.block_size, enable_caching=manager.enable_caching
+    )
+    return scheduler
 
 
 def check_pool(pool: BlockPool) -> None:
@@ -127,3 +171,75 @@ def check_scheduler(scheduler: Scheduler) -> None:
             assert 1 <= request.num_computed_tokens < request.num_tokens
             if request.output_token_ids and request.num_preemptions == 0:
                 assert request.num_computed_tokens == request.num_tokens - 1
+
+
+def check_finished(scheduler: Scheduler, request: Request) -> None:
+    assert request.is_finished
+    assert request.finished_step is not None
+    assert scheduler._requests.get(request.request_id) is not request
+
+
+def run_checked_step(
+    scheduler: Scheduler, sampled_token_ids: Mapping[str, int], aborted_ids: Sequence[str] = ()
+) -> tuple[ScheduledBatch, list[Request]]:
+    step = scheduler.num_steps
+    num_preemptions = scheduler.num_preemptions
+    running_before = request_ids(scheduler._running)
+    waiting_before = request_ids(scheduler._waiting)
+    requests = dict(scheduler._requests)
+    outputs_before = {
+        request_id: list(request.output_token_ids) for request_id, request in requests.items()
+    }
+    preemptions_before = {
+        request_id: request.num_preemptions for request_id, request in requests.items()
+    }
+    batch = scheduler.schedule()
+    check_scheduler(scheduler)
+    assert batch.step == step
+    assert scheduler.num_steps == step + 1
+    assert scheduler.num_preemptions == num_preemptions + len(batch.preempted)
+    for request_id, request in requests.items():
+        assert request.num_preemptions == preemptions_before[request_id] + (
+            request_id in batch.preempted
+        )
+    assert batch.scheduled_running[:1] == tuple(running_before[:1])
+    assert (*batch.scheduled_running, *batch.preempted[::-1]) == tuple(running_before)
+    admitted = (*batch.scheduled_resumed, *batch.scheduled_new)
+    assert admitted == tuple(waiting_before[: len(admitted)])
+    if waiting_before and not running_before:
+        assert admitted
+    assert request_ids(scheduler._waiting) == [
+        *batch.preempted[::-1],
+        *waiting_before[len(admitted) :],
+    ]
+    aborted = scheduler.finish_requests(*aborted_ids)
+    check_scheduler(scheduler)
+    completing = [
+        request_id
+        for request_id, num_new_tokens in batch.num_scheduled_tokens.items()
+        if requests[request_id] not in aborted
+        and requests[request_id].num_computed_tokens + num_new_tokens
+        == requests[request_id].num_tokens
+    ]
+    finished = scheduler.complete_step(batch, sampled_token_ids)
+    check_scheduler(scheduler)
+    assert finished == [
+        requests[request_id]
+        for request_id in completing
+        if sampled_token_ids[request_id] == scheduler.config.eos_token_id
+        or len(outputs_before[request_id]) + 1 == requests[request_id].max_output_tokens
+    ]
+    for request in aborted:
+        check_finished(scheduler, request)
+        assert request.status is RequestStatus.FINISHED_ABORTED
+    for request in finished:
+        check_finished(scheduler, request)
+        assert request.status is (
+            RequestStatus.FINISHED_STOPPED
+            if request.output_token_ids[-1] == scheduler.config.eos_token_id
+            else RequestStatus.FINISHED_LENGTH_CAPPED
+        )
+    for request_id, request in requests.items():
+        sampled = [sampled_token_ids[request_id]] if request_id in completing else []
+        assert request.output_token_ids == outputs_before[request_id] + sampled
+    return batch, finished
