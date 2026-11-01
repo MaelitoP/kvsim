@@ -1,6 +1,6 @@
 import math
 from collections import deque
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from dataclasses import asdict, replace
 from typing import cast
 
@@ -32,7 +32,11 @@ def make_request(
 
 
 def make_scheduler(
-    num_blocks: int = 64, max_running_requests: int = 256, max_tokens_per_step: int = 2048
+    num_blocks: int = 64,
+    max_running_requests: int = 256,
+    max_tokens_per_step: int = 2048,
+    enable_chunked_prefill: bool = True,
+    long_prefill_token_threshold: int = 0,
 ) -> Scheduler:
     return Scheduler(
         SchedulerConfig(
@@ -40,6 +44,8 @@ def make_scheduler(
             block_size=BLOCK_SIZE,
             max_running_requests=max_running_requests,
             max_tokens_per_step=max_tokens_per_step,
+            enable_chunked_prefill=enable_chunked_prefill,
+            long_prefill_token_threshold=long_prefill_token_threshold,
             eos_token_id=EOS,
         )
     )
@@ -76,31 +82,39 @@ def run_step(
     assert batch.scheduled_running == tuple(running_before)
     assert batch.scheduled_new == tuple(waiting_before[: len(batch.scheduled_new)])
     assert list(batch.num_scheduled_tokens) == [*batch.scheduled_running, *batch.scheduled_new]
-    assert batch.total_tokens <= scheduler.config.max_tokens_per_step
     if sampled_token_ids is None:
         sampled_token_ids = dict.fromkeys(batch.num_scheduled_tokens, TOKEN)
     finished = scheduler.complete_step(batch, sampled_token_ids)
     check_scheduler(scheduler)
-    for request in scheduler._running:
-        assert request.num_computed_tokens == request.num_tokens - 1
-        assert scheduler.kv_cache_manager.num_blocks_for(request) == math.ceil(
-            request.num_computed_tokens / BLOCK_SIZE
-        )
     return batch, finished
 
 
-@pytest.mark.parametrize(("max_running_requests", "max_tokens_per_step"), [(0, 8), (8, 0)])
-def test_config_rejects_empty_limits(max_running_requests: int, max_tokens_per_step: int) -> None:
-    with pytest.raises(ValueError, match="must be >= 1"):
-        SchedulerConfig(
-            num_blocks=4,
-            max_running_requests=max_running_requests,
-            max_tokens_per_step=max_tokens_per_step,
-        )
+@pytest.mark.parametrize(
+    ("make_config", "message"),
+    [
+        (lambda: SchedulerConfig(num_blocks=4, max_running_requests=0), "must be >= 1"),
+        (lambda: SchedulerConfig(num_blocks=4, max_tokens_per_step=0), "must be >= 1"),
+        (
+            lambda: SchedulerConfig(num_blocks=4, long_prefill_token_threshold=-1),
+            "must be >= 0, got -1",
+        ),
+        (
+            lambda: SchedulerConfig(
+                num_blocks=4, enable_chunked_prefill=False, long_prefill_token_threshold=8
+            ),
+            "requires enable_chunked_prefill",
+        ),
+    ],
+)
+def test_config_rejects_invalid_settings(
+    make_config: Callable[[], SchedulerConfig], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        make_config()
 
 
 def test_add_request_rejects_requests_that_could_never_run() -> None:
-    scheduler = make_scheduler(num_blocks=1, max_tokens_per_step=8)
+    scheduler = make_scheduler(num_blocks=1, max_tokens_per_step=8, enable_chunked_prefill=False)
     scheduler.add_request(make_request("r0"))
     with pytest.raises(ValueError, match="r0 is already WAITING"):
         scheduler.add_request(make_request("r0"))
@@ -196,7 +210,7 @@ def test_a_request_admitted_mid_generation_shares_the_step_with_decoding_ones() 
 
 
 def test_running_requests_are_served_before_waiting_ones_in_fcfs_order() -> None:
-    scheduler = make_scheduler(max_tokens_per_step=10)
+    scheduler = make_scheduler(max_tokens_per_step=10, enable_chunked_prefill=False)
     scheduler.add_request(make_request("decoding", num_prompt_tokens=4))
     run_step(scheduler)
     scheduler.add_request(make_request("big", num_prompt_tokens=10))
@@ -208,6 +222,48 @@ def test_running_requests_are_served_before_waiting_ones_in_fcfs_order() -> None
     assert list(batch.num_scheduled_tokens.items()) == [("big", 10)]
     batch, _ = run_step(scheduler)
     assert list(batch.num_scheduled_tokens.items()) == [("big", 1), ("small", 2)]
+
+
+def test_a_long_prompt_is_chunked_behind_decodes_and_samples_after_its_last_chunk() -> None:
+    scheduler = make_scheduler(num_blocks=256, max_tokens_per_step=256)
+    decoding = make_request("decoding", max_output_tokens=100)
+    long = make_request("long", num_prompt_tokens=1000)
+    scheduler.add_request(decoding)
+    run_step(scheduler)
+    scheduler.add_request(long)
+    for step, chunk in enumerate([255, 255, 255, 235], start=1):
+        batch, _ = run_step(scheduler, {"decoding": TOKEN, "long": EOS if step < 4 else TOKEN})
+        assert list(batch.num_scheduled_tokens.items()) == [("decoding", 1), ("long", chunk)]
+        assert long.output_token_ids == ([TOKEN] if step == 4 else [])
+    assert decoding.num_output_tokens == 5
+    assert long.first_scheduled_step == 1
+    assert long.first_token_step == 4
+
+
+def test_long_prefill_threshold_caps_chunks_while_other_requests_exist() -> None:
+    scheduler = make_scheduler(max_tokens_per_step=16, long_prefill_token_threshold=6)
+    scheduler.add_request(make_request("long", num_prompt_tokens=20))
+    scheduler.add_request(make_request("short", num_prompt_tokens=3, max_output_tokens=2))
+    batches = [run_step(scheduler)[0] for _ in range(3)]
+    assert [list(batch.num_scheduled_tokens.items()) for batch in batches] == [
+        [("long", 6), ("short", 3)],
+        [("long", 6), ("short", 1)],
+        [("long", 8)],
+    ]
+
+
+def test_chunked_admission_reserves_only_the_first_chunk_and_can_exhaust_the_cache() -> None:
+    scheduler = make_scheduler(num_blocks=4, max_tokens_per_step=4)
+    scheduler.add_request(make_request("held", num_prompt_tokens=4, max_output_tokens=100))
+    run_step(scheduler)
+    scheduler.add_request(make_request("long", num_prompt_tokens=16))
+    batches = [run_step(scheduler)[0] for _ in range(2)]
+    assert [list(batch.num_scheduled_tokens.items()) for batch in batches] == [
+        [("held", 1), ("long", 3)]
+    ] * 2
+    assert scheduler.kv_cache_manager.num_free_blocks == 0
+    with pytest.raises(RuntimeError, match="out of KV cache blocks for running request long"):
+        scheduler.schedule()
 
 
 def test_max_running_requests_caps_admission() -> None:
@@ -325,19 +381,23 @@ def test_requests_added_during_a_pending_batch_wait_until_the_next_step() -> Non
     arrivals=st.lists(st.integers(0, 3), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
     stops=st.lists(st.booleans(), min_size=MAX_REQUESTS, max_size=MAX_REQUESTS),
     max_running_requests=st.integers(1, 4),
-    max_tokens_per_step=st.integers(MAX_PROMPT, 2 * MAX_PROMPT),
+    prefill=st.tuples(st.just(False), st.integers(MAX_PROMPT, 2 * MAX_PROMPT), st.just(0))
+    | st.tuples(st.just(True), st.integers(1, 2 * MAX_PROMPT), st.integers(0, MAX_PROMPT)),
 )
 def test_limits_hold_and_every_request_finishes(
     prompts: list[int],
     arrivals: list[int],
     stops: list[bool],
     max_running_requests: int,
-    max_tokens_per_step: int,
+    prefill: tuple[bool, int, int],
 ) -> None:
+    enable_chunked_prefill, max_tokens_per_step, long_prefill_token_threshold = prefill
     scheduler = make_scheduler(
         num_blocks=max_running_requests * math.ceil((MAX_PROMPT + MAX_OUTPUT) / BLOCK_SIZE),
         max_running_requests=max_running_requests,
         max_tokens_per_step=max_tokens_per_step,
+        enable_chunked_prefill=enable_chunked_prefill,
+        long_prefill_token_threshold=long_prefill_token_threshold,
     )
     requests = [
         make_request(f"r{index}", num_prompt_tokens=prompt) for index, prompt in enumerate(prompts)
@@ -345,7 +405,7 @@ def test_limits_hold_and_every_request_finishes(
     pending = deque(requests)
     step = 0
     while pending or scheduler.has_unfinished_requests:
-        assert step < MAX_OUTPUT * len(requests) + len(arrivals)
+        assert step < sum(prompts) + MAX_OUTPUT * len(requests)
         num_arrivals = arrivals[step % len(arrivals)]
         if not scheduler.has_unfinished_requests:
             num_arrivals = max(num_arrivals, 1)
@@ -365,6 +425,7 @@ def test_limits_hold_and_every_request_finishes(
     assert scheduler.kv_cache_manager.usage == 0.0
     for request in requests:
         assert request.is_finished
+        assert request.num_computed_tokens == request.num_tokens - 1
         assert request.output_token_ids[:-1] == [TOKEN] * (len(request.output_token_ids) - 1)
         if request.status is RequestStatus.FINISHED_LENGTH_CAPPED:
             assert request.output_token_ids == [TOKEN] * MAX_OUTPUT

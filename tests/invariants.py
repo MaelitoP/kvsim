@@ -1,6 +1,6 @@
 import math
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
@@ -44,8 +44,14 @@ def check_scheduler(scheduler: Scheduler) -> None:
     manager = scheduler.kv_cache_manager
     check_manager(manager)
     block_size = scheduler.config.block_size
+    pending = scheduler._pending_batch
+    scheduled: Mapping[str, int] = pending.num_scheduled_tokens if pending is not None else {}
     waiting = list(scheduler._waiting)
     running = scheduler._running
+    if pending is not None:
+        assert set(scheduled) == set(request_ids(running))
+        assert all(num_tokens >= 1 for num_tokens in scheduled.values())
+        assert sum(scheduled.values()) <= scheduler.config.max_tokens_per_step
     assert len(running) <= scheduler.config.max_running_requests
     assert len(waiting) + len(running) == len(scheduler._requests)
     assert set(request_ids(waiting + running)) == set(scheduler._requests)
@@ -58,7 +64,11 @@ def check_scheduler(scheduler: Scheduler) -> None:
     for request in running:
         assert scheduler._requests[request.request_id] is request
         assert request.status is RequestStatus.RUNNING
-        assert request.num_computed_tokens <= request.num_tokens
-        num_blocks = manager.num_blocks_for(request)
-        assert math.ceil(request.num_computed_tokens / block_size) <= num_blocks
-        assert num_blocks <= math.ceil(request.num_tokens / block_size)
+        num_reserved_tokens = request.num_computed_tokens + scheduled.get(request.request_id, 0)
+        assert num_reserved_tokens <= request.num_tokens
+        assert manager.num_blocks_for(request) == math.ceil(num_reserved_tokens / block_size)
+        if pending is None:
+            if request.output_token_ids:
+                assert request.num_computed_tokens == request.num_tokens - 1
+            else:
+                assert 1 <= request.num_computed_tokens < request.num_prompt_tokens

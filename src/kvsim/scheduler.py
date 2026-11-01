@@ -13,6 +13,8 @@ class SchedulerConfig:
     block_size: int = 16
     max_running_requests: int = 256
     max_tokens_per_step: int = 2048
+    enable_chunked_prefill: bool = True
+    long_prefill_token_threshold: int = 0
     eos_token_id: int = 0
 
     def __post_init__(self) -> None:
@@ -21,6 +23,13 @@ class SchedulerConfig:
                 "max_running_requests and max_tokens_per_step must be >= 1, "
                 f"got {self.max_running_requests}, {self.max_tokens_per_step}"
             )
+        if self.long_prefill_token_threshold < 0:
+            raise ValueError(
+                "long_prefill_token_threshold must be >= 0, "
+                f"got {self.long_prefill_token_threshold}"
+            )
+        if self.long_prefill_token_threshold > 0 and not self.enable_chunked_prefill:
+            raise ValueError("long_prefill_token_threshold requires enable_chunked_prefill")
 
 
 @dataclass(frozen=True)
@@ -63,7 +72,10 @@ class Scheduler:
             raise ValueError(f"request {request.request_id} is not a fresh waiting request")
         if request.num_prompt_tokens < 1 or request.max_output_tokens < 1:
             raise ValueError(f"request {request.request_id} needs a prompt and an output token")
-        if request.num_prompt_tokens > self.config.max_tokens_per_step:
+        if (
+            not self.config.enable_chunked_prefill
+            and request.num_prompt_tokens > self.config.max_tokens_per_step
+        ):
             raise ValueError(
                 f"request {request.request_id} has {request.num_prompt_tokens} prompt tokens, "
                 f"more than the budget of {self.config.max_tokens_per_step}"
@@ -82,12 +94,21 @@ class Scheduler:
             raise RuntimeError(f"step {self._pending_batch.step} has not been completed")
         step = self.num_steps
         token_budget = self.config.max_tokens_per_step
+        max_tokens_per_request = (
+            self.config.long_prefill_token_threshold
+            if self.config.long_prefill_token_threshold > 0 and len(self._requests) > 1
+            else self.config.max_tokens_per_step
+        )
         num_scheduled_tokens: dict[str, int] = {}
         scheduled_running: list[str] = []
         scheduled_new: list[str] = []
 
         for request in self._running:
-            num_new_tokens = request.num_tokens - request.num_computed_tokens
+            num_new_tokens = min(
+                request.num_tokens - request.num_computed_tokens,
+                max_tokens_per_request,
+                token_budget,
+            )
             if self.kv_cache_manager.allocate_slots(request, num_new_tokens) is None:
                 raise RuntimeError(
                     f"out of KV cache blocks for running request {request.request_id}"
@@ -103,8 +124,9 @@ class Scheduler:
         ):
             request = self._waiting[0]
             num_new_tokens = request.num_tokens - request.num_computed_tokens
-            if num_new_tokens > token_budget:
+            if not self.config.enable_chunked_prefill and num_new_tokens > token_budget:
                 break
+            num_new_tokens = min(num_new_tokens, max_tokens_per_request, token_budget)
             if self.kv_cache_manager.allocate_slots(request, num_new_tokens) is None:
                 break
             self._waiting.popleft()
@@ -135,9 +157,11 @@ class Scheduler:
         if missing:
             raise ValueError(f"no sampled token for scheduled requests {sorted(missing)}")
         finished: list[Request] = []
-        for request_id, num_tokens in batch.num_scheduled_tokens.items():
+        for request_id, num_new_tokens in batch.num_scheduled_tokens.items():
             request = self._requests[request_id]
-            request.num_computed_tokens += num_tokens
+            request.num_computed_tokens += num_new_tokens
+            if request.num_computed_tokens < request.num_tokens:
+                continue
             token_id = sampled_token_ids[request_id]
             request.append_output_token(token_id)
             if request.first_token_step is None:
