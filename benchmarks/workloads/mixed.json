@@ -1,0 +1,11 @@
+{
+  "name": "mixed",
+  "seed": 0,
+  "vocab_size": 151643,
+  "num_requests": 200,
+  "prompt_len": [[64, 128], [1536, 2048]],
+  "output_len": 128,
+  "shared_prefix_len": 0,
+  "num_prefix_groups": 1,
+  "arrival": {"kind": "closed_loop", "concurrency": 16}
+}

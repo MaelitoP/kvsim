@@ -11,10 +11,11 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 | `request.py` | Store request inputs, progress and outcome | Prompt, generated tokens, status, timeline and block hashes |
 | `kv_cache_manager.py` | Allocate blocks for each request; find cached prefixes and cache full blocks | Block pool, request block tables and per-request cached-block counts |
 | `scheduler.py` | Build batches, preempt under memory pressure, apply sampled tokens and abort requests | Waiting queue, running list, live request registry, pending batch, preemption total and prefix-cache counters |
+| `workload.py` | Read a workload spec from JSON and generate its requests deterministically | None |
 
 `BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
-`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig` and the returned `ScheduledBatch` are frozen dataclasses.
+`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig`, the returned `ScheduledBatch`, and the workload types `WorkloadSpec`, `ClosedLoop`, `Poisson` and `RequestSpec` are frozen dataclasses.
 
 ### Block allocation
 
@@ -87,6 +88,30 @@ The caller supplies one sampled token per scheduled request, as a model samples 
 
 `finish_requests(*request_ids, status=FINISHED_ABORTED)` ends live requests in any state: waiting, preempted, running in partial prefill or decoding. Each one leaves the live registry and its queue, finishes with `status`, which must be a finished status, and releases its blocks, cached ones keeping their hashes; a live status raises before anything changes. Its `finished_step` is the most recently scheduled step, `num_steps - 1`, so its finish time is the end of that step like any other finished request; an abort before the first step records `-1`. Unknown and already finished IDs are ignored, a repeated ID included. It returns the requests it finished, in argument order. An abort may happen while a batch is pending. The batch keeps the aborted request's ID and token count; `complete_step` still requires its sampled token and then skips the ID: the request is gone, or a request re-added under that ID is waiting. Blocks the batch cached for that request's tokens keep their hashes, since completing the batch means it ran.
 
+## Workloads
+
+`workload.py` describes a benchmark scenario as a `WorkloadSpec` and expands it into the requests a driver submits, a list of `RequestSpec(request_id, prompt_token_ids, output_len, arrival_s)`. The planned simulator and load client will both generate from the same spec, so they submit the same prompts. Request IDs are `r0`, `r1` and so on, in generation order.
+
+A spec names its scenario and fixes a seed, a vocabulary size, a request count, length ranges, a shared prefix and an arrival model. Ranges are inclusive and every length is at least one. `prompt_len` holds one or more ranges, and request `i` draws from range `i % len(prompt_len)`, so two ranges alternate short and long prompts. `output_len` is one range. With a positive `shared_prefix_len`, requests are dealt round robin to `num_prefix_groups` groups, each with its own random prefix of that length, and `prompt_len` sets the number of tokens after the prefix. Several groups without a shared prefix is rejected. Every token is drawn uniformly from `range(vocab_size)`, so past its group prefix a prompt matches another prompt's token at the same position only by chance, with probability `1 / vocab_size`. For two prompts to share one cached block beyond the prefix, that coincidence would have to repeat for `block_size` tokens in a row.
+
+The arrival model is `ClosedLoop(concurrency)` or `Poisson(rate)`. In a closed loop every request has `arrival_s == 0.0`: all are ready at the start, and the driver keeps at most `concurrency` of them in flight, submitting the next one when one finishes. With Poisson arrivals the first request arrives at 0.0, and the gaps between arrivals are independent exponential draws with a mean of `1 / rate` seconds. Arrival times are simulated seconds for the simulator and wall-clock seconds for the client.
+
+`generate_requests(spec)` draws everything from one `random.Random(spec.seed)` in a fixed order: the group prefixes; then, for each request, its prompt length, its tokens and its output length; then the arrival gaps. The arrival model therefore never changes the prompts. Across Python versions, only `Random.random()` is guaranteed to produce the same sequence. The project pins Python 3.12, and tests pin a digest of the requests generated for each benchmark scenario and for a Poisson workload, so any change in generation, deliberate or not, fails a test. `Random` ignores the sign of an integer seed, so negative seeds are rejected rather than producing the same workload as their positive counterpart.
+
+`load_spec(path)` reads a UTF-8 JSON file. `parse_spec(data)` reads an already decoded object, such as the `workload` entry of a result file. A length can be written as a number or a `[low, high]` range; `prompt_len` can also be a list of ranges. The arrival is an object whose `kind` is `closed_loop` or `poisson`. Every key is required and unknown keys are rejected. Integer fields must be JSON integers, not booleans, floats or strings, so a misspelt key or a quoted number raises `ValueError` instead of changing the workload. `dataclasses.asdict(spec)` gives the spec as plain data, with ranges as tuples and the arrival with its `kind`. `parse_spec` reads it back to an equal spec, directly or after a trip through JSON.
+
+`benchmarks/workloads/` holds the five scenarios of the benchmark matrix. All of them use a closed loop and seed 0:
+
+| File | Prompt tokens | Output tokens | Concurrency | Requests | Studies |
+| --- | --- | --- | --- | --- | --- |
+| `short_low.json` | 128 to 256 | 128 | 4 | 200 | Baseline |
+| `long_high.json` | 1536 to 2048 | 128 | 32 | 200 | Saturation, time to first token |
+| `shared_prefix.json` | 1024 shared in 8 groups, then 128 to 256 | 128 | 16 | 256 | Prefix caching |
+| `mixed.json` | 64 to 128 and 1536 to 2048, alternating | 128 | 16 | 200 | Chunked prefill |
+| `saturation.json` | 1024 | 512 | 48 | 192 | Preemption under a small cache |
+
+Their vocabulary size, 151,643, is the number of regular tokens of the Qwen2.5-3B-Instruct tokenizer, the model the benchmarks will run. Its special tokens start at ID 151,643, so every generated ID decodes to ordinary text.
+
 ## Invariants and where they are checked
 
 The helpers live in `tests/invariants.py`, except the machines. `check_scheduler` calls `check_manager`, which calls `check_pool`. `run_checked_step` drives one step and calls `check_scheduler` after its `schedule()`, `finish_requests` and `complete_step`; the scheduler tests run their steps through it, and some also call the scheduler directly to test rejected calls. The machines call their checker after every rule.
@@ -112,6 +137,7 @@ The helpers live in `tests/invariants.py`, except the machines. `check_scheduler
 | Every request finishes: draining the scheduler takes at most the sum of the live requests' prompt and output lengths in steps, and leaves no block allocated. | `SchedulerMachine.teardown` |
 | Within one process, the same inputs give the same trace: replaying every operation on a fresh scheduler yields equal batches, finished requests and abort results. This catches state-dependent nondeterminism, such as ordering by object identity or unseeded randomness, but not a dependence on the process's string hash seed; comparing traces across processes belongs to the simulator's command-line tests. | `SchedulerMachine.teardown` |
 | After `update_block_hashes` with one block size, a request's hashes are the hash chain of its full blocks, and earlier hashes are never recomputed. | `tests/test_request.py`; a pinned digest in `tests/test_block_hash.py` guards the encoding |
+| A workload spec generates the same requests in every process: a digest of each benchmark scenario's requests and of a Poisson workload is pinned. Requests follow their spec: lengths within the range their position picks, the prefix of their group, tokens within the vocabulary, the spec's arrival model. A spec survives a round trip through `asdict`, with or without JSON. | `tests/test_workload.py` |
 
 Two hypothesis machines drive these helpers. `BlockPoolMachine` in `tests/test_block_pool.py` mixes allocate, release, retain, cache and reset on one pool and checks each rule's effect on allocation order, eviction and the map against the state before the rule. `SchedulerMachine` in `tests/test_stateful.py` draws a configuration, then mixes arrivals of one to three requests, steps that may abort a request while the batch is pending, and aborts of live, finished and unknown IDs. The configuration covers prefix caching on and off, chunked prefill on and off with or without a long-prefill threshold, block sizes 2 and 4, and pools between one request's maximum and two blocks more, so preemption is frequent. Prompts take a block-aligned slice of one of two shared prefixes, so caching examples hit. Example tests cover the cases a machine reaches too rarely to rely on: allocation order, admission, chunking, preemption order, resumption, prefix sharing, the lookup cap and its first-miss stop, hits at the head of the free queue, aborts in every state and a same-ID re-add during a pending batch.
 
@@ -137,6 +163,8 @@ These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 | `BlockHash`, `NONE_HASH`, `hash_block_tokens` | [Same names in `kv_cache_utils.py`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py) |
 | `hash_full_blocks`, `Request.update_block_hashes` | [`get_request_block_hasher`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py), [`Request.update_block_hashes`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/request.py) |
 | Discarded tokens of partial prefills | [`discard_request_mask` in the GPU model runner](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/worker/gpu_model_runner.py) |
+| `WorkloadSpec` lengths and shared prefix | [`vllm bench serve` dataset flags](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/datasets/datasets.py): `--random-input-len`, `--random-prefix-len`, `--prefix-repetition-prefix-len`, `--prefix-repetition-num-prefixes` |
+| `ClosedLoop`, `Poisson` | [`--max-concurrency`, `--request-rate`, `--burstiness`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/serve.py) |
 
 The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
 
@@ -158,8 +186,12 @@ vLLM's `finish_requests` takes one ID, an iterable of IDs, or `None` for every r
 
 vLLM accepts `long_prefill_token_threshold` with chunked prefill off and still caps admitted prompts by it; the lab rejects that configuration. The lab has no adaptive threshold (`long_prefill_token_threshold_adaptive`).
 
+`vllm bench serve` builds similar workloads from dataset flags. Its random dataset also counts `--random-prefix-len` outside the sampled input length, but gives every request the same prefix. Its prefix repetition dataset generates `num_requests // num_prefixes` prompts per prefix, dropping the remainder, then shuffles them. The lab deals requests round robin, so it generates exactly the requested count and each request's group follows from its position. vLLM also regenerates token sequences until their decoded text re-encodes to the target length. The lab generates token IDs only, and turning them into text prompts for an engine's tokenizer is the load client's job.
+
+For arrivals, `--max-concurrency` with an infinite `--request-rate` is the lab's closed loop. A finite rate draws gamma-distributed gaps, which are exponential with `--burstiness 1`. vLLM delays even the first request by its own gap, then rescales every arrival time so that the last one lands at exactly `num_requests / rate`. The lab's first request arrives at 0.0, since an idle interval before it measures nothing. The lab keeps the gaps unscaled, so the arrivals remain a Poisson process, and the realised rate differs from `rate` only by sampling noise, about `1 / sqrt(num_requests)` relative.
+
 ## Planned features
 
-- **Workloads and metrics:** add deterministic workload replay, traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
+- **Simulation and metrics:** replay workloads step by step with traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.
