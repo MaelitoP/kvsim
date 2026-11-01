@@ -59,7 +59,7 @@ def test_failed_allocation_and_unknown_free_leave_pool_and_tables_unchanged() ->
     check_manager(manager)
 
 
-def test_free_returns_every_block_with_the_tail_block_first() -> None:
+def test_free_returns_blocks_to_the_head_in_table_order() -> None:
     manager = KVCacheManager(num_blocks=4, block_size=1)
     request = make_request()
     new_blocks = manager.allocate_slots(request, num_new_tokens=3)
@@ -67,7 +67,7 @@ def test_free_returns_every_block_with_the_tail_block_first() -> None:
     assert block_ids(new_blocks) == [0, 1, 2]
     assert manager.usage == 0.75
     manager.free(request)
-    assert block_ids(manager.block_pool._free_queue) == [3, 2, 1, 0]
+    assert block_ids(manager.block_pool._free_queue) == [0, 1, 2, 3]
     assert manager.num_blocks_for(request) == 0
     assert manager.usage == 0.0
     check_manager(manager)

@@ -36,19 +36,49 @@ class FreeBlockQueue:
     def append(self, block: KVCacheBlock) -> None:
         self._blocks[block.block_id] = block
 
+    def appendleft(self, block: KVCacheBlock) -> None:
+        self._blocks[block.block_id] = block
+        self._blocks.move_to_end(block.block_id, last=False)
+
     def remove(self, block: KVCacheBlock) -> None:
         del self._blocks[block.block_id]
 
 
 class BlockPool:
+    """Allocation uses every unhashed free block before evicting cached ones, oldest first."""
+
     def __init__(self, num_blocks: int) -> None:
         self.num_blocks = num_blocks
         self._blocks = [KVCacheBlock(block_id) for block_id in range(num_blocks)]
         self._free_queue = FreeBlockQueue(self._blocks)
+        self._block_by_hash: dict[BlockHash, KVCacheBlock] = {}
 
     @property
     def num_free_blocks(self) -> int:
         return len(self._free_queue)
+
+    def get_cached_block(self, block_hash: BlockHash) -> KVCacheBlock | None:
+        return self._block_by_hash.get(block_hash)
+
+    def cache_full_blocks(
+        self, blocks: Iterable[KVCacheBlock], block_hashes: Iterable[BlockHash]
+    ) -> None:
+        for block, block_hash in zip(blocks, block_hashes, strict=True):
+            if block.ref_count == 0:
+                raise ValueError(f"block {block.block_id} is free")
+            if block.block_hash is not None:
+                raise ValueError(f"block {block.block_id} is already cached")
+            if block_hash not in self._block_by_hash:
+                block.block_hash = block_hash
+                self._block_by_hash[block_hash] = block
+
+    def reset_prefix_cache(self) -> bool:
+        if self.num_free_blocks < self.num_blocks:
+            return False
+        self._block_by_hash.clear()
+        for block in self._blocks:
+            block.block_hash = None
+        return True
 
     def allocate(self, num_blocks: int) -> list[KVCacheBlock]:
         if not 0 <= num_blocks <= self.num_free_blocks:
@@ -56,6 +86,9 @@ class BlockPool:
         blocks: list[KVCacheBlock] = []
         for _ in range(num_blocks):
             block = self._free_queue.popleft()
+            if block.block_hash is not None:
+                del self._block_by_hash[block.block_hash]
+                block.block_hash = None
             block.ref_count = 1
             blocks.append(block)
         return blocks
@@ -65,7 +98,11 @@ class BlockPool:
             if block.ref_count == 0:
                 raise ValueError(f"block {block.block_id} is already free")
             block.ref_count -= 1
-            if block.ref_count == 0:
+            if block.ref_count > 0:
+                continue
+            if block.block_hash is None:
+                self._free_queue.appendleft(block)
+            else:
                 self._free_queue.append(block)
 
     def retain(self, blocks: Iterable[KVCacheBlock]) -> None:

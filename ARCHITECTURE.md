@@ -6,7 +6,7 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 
 | Module | Responsibility | Owned state |
 | --- | --- | --- |
-| `block_pool.py` | Allocate, retain and release fixed-size blocks | Block objects, reference counts and free queue |
+| `block_pool.py` | Allocate, retain and release fixed-size blocks; register and evict cached blocks | Block objects, reference counts, free queue and hash-to-block map |
 | `block_hash.py` | Hash full blocks of tokens into a chain of prefix fingerprints | None |
 | `request.py` | Store request inputs, progress and outcome | Prompt, generated tokens, status, timeline and block hashes |
 | `kv_cache_manager.py` | Allocate blocks for each request | Block pool and request block tables |
@@ -18,13 +18,17 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 
 ### Block allocation
 
-`BlockPool(num_blocks)` creates blocks in ID order. `allocate(n)` takes blocks from the head of the free queue with a reference count of one. A negative count or insufficient capacity raises before changing state. `retain(blocks)` adds references and removes any newly referenced blocks from the free queue. `release(blocks)` removes references; blocks that reach zero join the tail in the supplied order. Releasing an already free block raises.
+`BlockPool(num_blocks)` creates blocks in ID order. `allocate(n)` takes blocks from the head of the free queue with a reference count of one. A negative count or insufficient capacity raises before changing state. `retain(blocks)` adds references and removes any newly referenced blocks from the free queue. `release(blocks)` removes references. A block that reaches zero without a hash goes to the head of the free queue, so unhashed blocks are reused last in, first out. A block with a hash goes to the tail, in the supplied order. Releasing an already free block raises.
 
-The free queue uses an `OrderedDict` for constant-time removal from the head, insertion at the tail and removal by block ID. `block_hash` is reserved for prefix caching; no current operation sets or indexes it.
+The pool also holds the prefix cache: a map from `BlockHash` to the one block registered under it. `cache_full_blocks(blocks, block_hashes)` gives each allocated, unhashed block its hash and registers it. When the hash already maps to another block, the map keeps that block and the new one stays unhashed. A request's table can then hold a block whose content duplicates a cached one. Caching a free or already hashed block raises, and so do block and hash sequences of different lengths; the pairs before the invalid one stay cached. `get_cached_block(hash)` returns the registered block, free or allocated, or `None`. A freed cached block keeps its hash and stays a hit until `allocate` pops it from the free queue or `reset_prefix_cache` clears it. Popping evicts it: the hash leaves the block and the map. `retain` on a cached free block takes it out of the free queue without touching its hash. `reset_prefix_cache()` clears every hash and returns `True` only when every block is free; otherwise it changes nothing and returns `False`. The cleared blocks keep their places in the free queue.
+
+The two ends of the free queue keep eviction cheap. Unhashed blocks hold nothing reusable, so they are consumed first. Cached blocks sit behind them, in the order they were freed, and are evicted least recently freed first. The caller releases a request's table in reverse, so a request's last block, the one covering the most tokens and the least likely to be shared, is evicted before its earlier blocks. A free queue is therefore always a run of unhashed blocks followed by a run of cached ones. Without prefix caching no block is ever hashed, every released block goes to the head, and eviction never happens.
+
+The free queue uses an `OrderedDict` for constant-time removal from the head, insertion at both ends and removal by block ID.
 
 `KVCacheManager(num_blocks, block_size)` requires both sizes to be positive. `allocate_slots(request, num_new_tokens)` reserves enough blocks for `request.num_computed_tokens + num_new_tokens`, rounded up by block size. The caller supplies a nonnegative count and advances computed tokens before allocating the next step. Existing block tables only grow until freed.
 
-An allocation returns the new blocks, possibly an empty list. It returns `None` without changing the pool or tables when capacity is insufficient. `free(request)` releases the entire table in reverse order, keeping earlier prompt blocks later in the free queue. Freeing a request without a table does nothing. `num_blocks_for`, `num_free_blocks` and `usage` report block counts and the fraction of allocated blocks.
+An allocation returns the new blocks, possibly an empty list. It returns `None` without changing the pool or tables when capacity is insufficient. `free(request)` releases the entire table in reverse order: unhashed blocks end at the head in table order, and cached blocks end at the tail with the request's first block evicted last. Freeing a request without a table does nothing. `num_blocks_for`, `num_free_blocks` and `usage` report block counts and the fraction of allocated blocks.
 
 ### Block hashes
 
@@ -79,6 +83,8 @@ The caller supplies one sampled token per scheduled request, as a model samples 
 
 - After `update_block_hashes(block_size)` with the same block size on every call, a request's `block_hashes` equals `hash_full_blocks(block_size, all_token_ids)`: one hash per full block, none for a partial tail. Earlier hashes are the same objects as before the call.
 - The pool contains the same block objects throughout its lifetime. A block is free exactly when its reference count is zero and it appears in the free queue.
+- A block has a hash exactly when the map holds it under that hash. A cached block may be free or allocated.
+- The free queue holds every unhashed free block before every cached one.
 - A block's reference count matches the request tables holding it. Requests do not share blocks yet.
 - A request table holds exactly enough blocks for its computed tokens plus the tokens reserved by the pending batch. Waiting, preempted and finished requests hold no blocks.
 - Each live request belongs to exactly one queue with the matching status and object identity. Finished requests leave the registry.
@@ -101,13 +107,18 @@ These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 | `ScheduledBatch`, `complete_step` | [`SchedulerOutput`, `update_from_output`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
 | `Scheduler._preempt`, `ScheduledBatch.preempted`, `scheduled_resumed` | [`_preempt_request`, `preempted_req_ids`, `scheduled_resumed_reqs`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
 | `add_request` longest-sequence check | [`verify_max_model_len`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/config/scheduler.py), [`_check_enough_kv_cache_memory`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_planning.py) |
+| `BlockPool.cache_full_blocks`, `get_cached_block`, `reset_prefix_cache`, eviction in `allocate` | [`cache_full_blocks`, `get_cached_block`, `reset_prefix_cache`, `_maybe_evict_cached_block`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/block_pool.py) |
 | `BlockHash`, `NONE_HASH`, `hash_block_tokens` | [Same names in `kv_cache_utils.py`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py) |
 | `hash_full_blocks`, `Request.update_block_hashes` | [`get_request_block_hasher`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/kv_cache_utils.py), [`Request.update_block_hashes`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/request.py) |
 | Discarded tokens of partial prefills | [`discard_request_mask` in the GPU model runner](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/worker/gpu_model_runner.py) |
 
 The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
 
-The lab allocates every block, including block zero. vLLM reserves a null block. The lab always appends released blocks to the free queue; this vLLM revision distinguishes reuse order for cached and uncached blocks.
+The lab allocates every block, including block zero. vLLM reserves a null block.
+
+Released blocks follow vLLM's split: unhashed to the head, hashed to the tail. vLLM's [design doc](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/docs/design/prefix_caching.md) still says every freed block is appended to the tail. The split came with [#42656](https://github.com/vllm-project/vllm/pull/42656): unhashed partial blocks at the tail aged like cache entries and evicted real cached prefixes, and the PR measured lost hits restored. With caching off, vLLM's order went from append to prepend and back twice in 2026 ([#48017](https://github.com/vllm-project/vllm/pull/48017), [#51482](https://github.com/vllm-project/vllm/pull/51482)), for CPU overhead and a TPU runtime fault rather than for caching. In the lab that order only changes which block IDs are reused. The lab applies the same rule whatever the configuration, so the pool needs no caching flag. vLLM prepends one call's unhashed blocks as a group in the supplied order; the lab pushes them one at a time, which reverses their order among themselves and changes nothing else.
+
+vLLM's map can hold several blocks under one hash, and both stay cached until evicted. The lab keeps one block per hash and leaves the duplicate unhashed, so it is reused first once freed; a later identical request hits the registered block either way.
 
 vLLM guarantees that one request of `max_model_len` tokens fits: startup fails when the cache cannot hold one, the budget must reach `max_model_len` when chunking is off, and requests stop at that length. The lab has no `max_model_len`; it checks each request's own longest sequence when the request is added, then admits it against currently free blocks. With chunking on, admission only needs blocks for the first chunk; no space is reserved for future output. vLLM's allocator also supports full-sequence admission checks. The lab supports FCFS and stops on EOS or the output limit.
 
@@ -119,7 +130,7 @@ vLLM accepts `long_prefill_token_threshold` with chunked prefill off and still c
 
 ## Planned features
 
-- **Prefix caching:** register hashed full blocks in the pool, evict the least recently freed, share cached prefixes on admission, and remove hash entries on eviction. Admission lookup covers at most `num_tokens - 1` tokens so some computation remains.
+- **Prefix caching:** look up cached prefixes on admission, share their blocks between requests, and cache each request's full blocks as it runs. Admission lookup covers at most `num_tokens - 1` tokens so some computation remains.
 - **Abort, workloads and metrics:** add request cancellation, deterministic workload replay, traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

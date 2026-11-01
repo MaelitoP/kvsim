@@ -23,6 +23,12 @@ def check_pool(pool: BlockPool) -> None:
     for block in pool._blocks:
         assert block.ref_count >= 0
         assert (block.ref_count == 0) == (block in pool._free_queue)
+    for block_hash, block in pool._block_by_hash.items():
+        assert block is pool._blocks[block.block_id]
+        assert block.block_hash == block_hash
+    assert sum(block.block_hash is not None for block in pool._blocks) == len(pool._block_by_hash)
+    cached_flags = [block.block_hash is not None for block in pool._free_queue]
+    assert cached_flags == sorted(cached_flags)
 
 
 def check_manager(manager: KVCacheManager) -> None:
