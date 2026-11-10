@@ -12,10 +12,12 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 | `kv_cache_manager.py` | Allocate blocks for each request; find cached prefixes and cache full blocks | Block pool, request block tables and per-request cached-block counts |
 | `scheduler.py` | Build batches, preempt under memory pressure, apply sampled tokens and abort requests | Waiting queue, running list, live request registry, pending batch, preemption total and prefix-cache counters |
 | `workload.py` | Read a workload spec from JSON and generate its requests deterministically | None |
+| `simulator.py` | Replay a workload through a scheduler, estimate step durations and build the result | None |
+| `__main__.py` | Command line: `kvsim simulate` | None |
 
 `BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
-`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig`, the returned `ScheduledBatch`, and the workload types `WorkloadSpec`, `ClosedLoop`, `Poisson` and `RequestSpec` are frozen dataclasses.
+`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig`, the returned `ScheduledBatch`, the workload types `WorkloadSpec`, `ClosedLoop`, `Poisson` and `RequestSpec`, and `CostModel` are frozen dataclasses. A simulation result is a `TypedDict`: it is the content of a JSON file, written and read back as plain dictionaries.
 
 ### Block allocation
 
@@ -90,7 +92,7 @@ The caller supplies one sampled token per scheduled request, as a model samples 
 
 ## Workloads
 
-`workload.py` describes a benchmark scenario as a `WorkloadSpec` and expands it into the requests a driver submits, a list of `RequestSpec(request_id, prompt_token_ids, output_len, arrival_s)`. The planned simulator and load client will both generate from the same spec, so they submit the same prompts. Request IDs are `r0`, `r1` and so on, in generation order.
+`workload.py` describes a benchmark scenario as a `WorkloadSpec` and expands it into the requests a driver submits, a list of `RequestSpec(request_id, prompt_token_ids, output_len, arrival_s)`. The simulator generates from the spec, and the planned load client will generate from the same one, so both submit the same prompts. Request IDs are `r0`, `r1` and so on, in generation order.
 
 A spec names its scenario and fixes a seed, a vocabulary size, a request count, length ranges, a shared prefix and an arrival model. Ranges are inclusive and every length is at least one. `prompt_len` holds one or more ranges, and request `i` draws from range `i % len(prompt_len)`, so two ranges alternate short and long prompts. `output_len` is one range. With a positive `shared_prefix_len`, requests are dealt round robin to `num_prefix_groups` groups, each with its own random prefix of that length, and `prompt_len` sets the number of tokens after the prefix. Several groups without a shared prefix is rejected. Every token is drawn uniformly from `range(vocab_size)`, so past its group prefix a prompt matches another prompt's token at the same position only by chance, with probability `1 / vocab_size`. For two prompts to share one cached block beyond the prefix, that coincidence would have to repeat for `block_size` tokens in a row.
 
@@ -112,9 +114,43 @@ The arrival model is `ClosedLoop(concurrency)` or `Poisson(rate)`. In a closed l
 
 Their vocabulary size, 151,643, is the number of regular tokens of the Qwen2.5-3B-Instruct tokenizer, the model the benchmarks will run. Its special tokens start at ID 151,643, so every generated ID decodes to ordinary text.
 
+## Simulation
+
+`simulate(spec, config, cost_model)` replays a workload through a fresh `Scheduler` and returns the result as plain data. It reads no clock and draws nothing at random beyond the spec's seed. Time is the scheduler's step counter plus a clock of estimated seconds, and the result reports both.
+
+Each turn of the loop is one step. The requests that have arrived are submitted first, in spec order. In a closed loop the next request arrives as soon as fewer than `concurrency` requests are in flight, submitted and not finished: at 0.0 for the first ones, then at the end of a step in which a request finished. Its recorded `arrival_s` is the clock at that moment. With Poisson arrivals a request is submitted at the first step boundary at or after its `arrival_s`, and that `arrival_s` is recorded, so the wait for the boundary counts in its time to first token. When nothing is in flight the clock jumps to the next arrival and no step runs. The simulator then calls `schedule()`, records a sample, samples one token for each scheduled request, calls `complete_step` and advances the clock by the estimated duration of the step.
+
+A sampled token depends only on the request's ID and the number of tokens the request has generated, through CRC-32. A request's output is therefore the same whatever the schedule, after a preemption and in every process; Python's `hash` of a string changes from one process to the next. The token is never the EOS token. A request ends at its output limit, the `output_len` of its spec, which is what the planned load client asks of an engine with `ignore_eos` and `max_tokens`.
+
+`CostModel(step_overhead_s, prefill_s_per_token, decode_s_per_seq)` estimates a step as `step_overhead_s + prefill_s_per_token * num_prefill_tokens + decode_s_per_seq * num_decode_seqs`. A request scheduled for exactly one token counts as a decode sequence; a request scheduled for more adds its tokens to the prefill tokens. The split follows what the step computes, not the request's history: the one-token tail of a chunked prompt, or a prompt whose cache hit leaves one token, costs one position like a decode. The step overhead must be positive, so every step takes time and sample times strictly increase. The other two coefficients must be at least zero, and all three finite. `step_duration` takes the token counts of a batch and makes the split itself. The defaults, 20 ms per step, 0.2 ms per prefill token and 0.5 ms per decode sequence, are placeholders, not measurements. Until coefficients are fitted to an engine, the seconds of a result only compare runs made with the same cost model; its step numbers and scheduler counters do not depend on the cost model at all.
+
+### Result
+
+The result has the shape the benchmarks will use for engine measurements, with the simulator's own keys added:
+
+| Key | Content |
+| --- | --- |
+| `source`, `measured` | `"simulator"` and `false`: every time in the file is an estimate |
+| `engine_version`, `model`, `gpu` | The kvsim version; `null` for the other two |
+| `config` | `block_size`, `num_blocks`, `kv_tokens` (their product), `max_num_seqs`, `max_num_batched_tokens`, `enable_prefix_caching`, `enable_chunked_prefill`, `long_prefill_token_threshold`, and `command`, `null` for the simulator |
+| `cost_model` | The three coefficients behind every time in the file; simulator only |
+| `workload` | The spec as `dataclasses.asdict` gives it; `parse_spec` reads it back |
+| `requests` | One record per request, in spec order |
+| `samples` | One record per step |
+
+A request record holds `request_id`, `arrival_s`, `first_token_s`, `finish_s`, `first_token_step`, `finish_step`, `prompt_tokens`, `output_tokens`, and `server_ttft_ms` and `server_queue_ms`, which only an engine reports and are `null` here. `first_token_s` and `finish_s` are the clock at the end of the steps that sampled the request's first and last tokens; the two step fields are simulator only.
+
+A sample holds `step`, `t_s`, `kv_usage`, `running`, `waiting`, `preemptions_total`, `prefix_queries_total` and `prefix_hits_total`. It is taken after `schedule()` and before `complete_step`, and `t_s` is the start of the step: the sample describes the batch that runs from `t_s` until the step ends, which is the next sample's `t_s` unless the simulator then goes idle. The last step ends at the latest `finish_s`. `running` is the batch size, since every running request is scheduled. `waiting` counts the other requests in flight. `kv_usage` includes the blocks of requests that finish in the step, so its maximum over a run is the highest usage any step runs with. Inside `schedule()` the cache can briefly be fuller, before a preemption frees blocks. The counters are cumulative and include the step's own preemptions and admissions. Idle time between Poisson arrivals has no sample.
+
+The same spec, configuration and cost model give the same result, and the same bytes once written: the clock adds the same floating-point durations in the same order, and no ordering depends on the string hash seed.
+
+### Command line
+
+`kvsim simulate <spec.json> --num-blocks N --out <result.json>`, or `python -m kvsim` with the same arguments, runs one simulation and writes the result as indented UTF-8 JSON, creating the parent directories of the output. `--block-size`, `--max-num-seqs`, `--max-num-batched-tokens`, `--long-prefill-token-threshold`, `--enable-prefix-caching` and `--enable-chunked-prefill`, each of the last two with its `--no-enable-...` form, set the scheduler configuration and default to `SchedulerConfig`'s defaults. `--cost-step-overhead-s`, `--cost-prefill-s-per-token` and `--cost-decode-s-per-seq` set the cost model. A spec that cannot be read, an invalid configuration or cost model, a request the cache could never hold, a result with a time too large for a float and an output path that cannot be written are reported as usage errors with exit status 2, and no result is written. JSON has no infinity, so a non-finite time is refused rather than written.
+
 ## Invariants and where they are checked
 
-The helpers live in `tests/invariants.py`, except the machines. `check_scheduler` calls `check_manager`, which calls `check_pool`. `run_checked_step` drives one step and calls `check_scheduler` after its `schedule()`, `finish_requests` and `complete_step`; the scheduler tests run their steps through it, and some also call the scheduler directly to test rejected calls. The machines call their checker after every rule.
+The helpers live in `tests/invariants.py`, except the machines. `tests/strategies.py` holds the hypothesis strategies for workload specs and scheduler configurations that several test modules share. `check_scheduler` calls `check_manager`, which calls `check_pool`. `run_checked_step` drives one step and calls `check_scheduler` after its `schedule()`, `finish_requests` and `complete_step`; the scheduler tests run their steps through it, and some also call the scheduler directly to test rejected calls. The machines call their checker after every rule.
 
 | Invariant | Checked by |
 | --- | --- |
@@ -135,9 +171,13 @@ The helpers live in `tests/invariants.py`, except the machines. `check_scheduler
 | A request appends exactly the sampled token in the step its computation completes, so partial prefills and aborted requests produce nothing and no other output changes. Exactly the completing requests that sampled EOS or reached their output limit finish, as `FINISHED_STOPPED` when the last token is EOS and `FINISHED_LENGTH_CAPPED` otherwise; aborted requests finish as `FINISHED_ABORTED`. | `run_checked_step` |
 | A request's output does not depend on the schedule: with a sampler that derives each token from the output position, every request ends with the output that sampler implies, whatever the configuration, pool size, preemptions or aborts. | `SchedulerMachine.teardown` in `tests/test_stateful.py` |
 | Every request finishes: draining the scheduler takes at most the sum of the live requests' prompt and output lengths in steps, and leaves no block allocated. | `SchedulerMachine.teardown` |
-| Within one process, the same inputs give the same trace: replaying every operation on a fresh scheduler yields equal batches, finished requests and abort results. This catches state-dependent nondeterminism, such as ordering by object identity or unseeded randomness, but not a dependence on the process's string hash seed; comparing traces across processes belongs to the simulator's command-line tests. | `SchedulerMachine.teardown` |
+| Within one process, the same inputs give the same trace: replaying every operation on a fresh scheduler yields equal batches, finished requests and abort results. This catches state-dependent nondeterminism, such as ordering by object identity or unseeded randomness, but not a dependence on the process's string hash seed, which the simulator's command-line test covers. | `SchedulerMachine.teardown` |
 | After `update_block_hashes` with one block size, a request's hashes are the hash chain of its full blocks, and earlier hashes are never recomputed. | `tests/test_request.py`; a pinned digest in `tests/test_block_hash.py` guards the encoding |
 | A workload spec generates the same requests in every process: a digest of each benchmark scenario's requests and of a Poisson workload is pinned. Requests follow their spec: lengths within the range their position picks, the prefix of their group, tokens within the vocabulary, the spec's arrival model. A spec survives a round trip through `asdict`, with or without JSON. | `tests/test_workload.py` |
+| A simulation follows its spec: one record per request in spec order, with the spec's prompt and output lengths. A request generates at most one token per step and arrives no later than the start of its first-token step. A step number maps to one end time, after that step's start and no later than the next step's start. | `check_result` |
+| Samples are numbered from zero, one per step, at strictly increasing times that start at 0.0. Each schedules at least one request, within the running limit, and uses part of the cache. Counters never decrease, and prefix hits never exceed queries. `running + waiting` equals the number of requests that have arrived and not finished at the sample's time. | `check_result` |
+| A closed loop keeps exactly `concurrency` requests in flight while requests remain: the first `concurrency` arrive at 0.0 and each later one arrives at the next finish time, in order. Poisson requests keep the arrival times of their spec. | `check_result` |
+| The same spec, configuration and cost model give the same result in one process, and byte-identical files from two processes with different string hash seeds. No result holds token IDs, so the files guard orderings; pinned values guard the sampled token itself, a fixed function of the request ID and the output position that is never EOS. | `tests/test_simulator.py` |
 
 Two hypothesis machines drive these helpers. `BlockPoolMachine` in `tests/test_block_pool.py` mixes allocate, release, retain, cache and reset on one pool and checks each rule's effect on allocation order, eviction and the map against the state before the rule. `SchedulerMachine` in `tests/test_stateful.py` draws a configuration, then mixes arrivals of one to three requests, steps that may abort a request while the batch is pending, and aborts of live, finished and unknown IDs. The configuration covers prefix caching on and off, chunked prefill on and off with or without a long-prefill threshold, block sizes 2 and 4, and pools between one request's maximum and two blocks more, so preemption is frequent. Prompts take a block-aligned slice of one of two shared prefixes, so caching examples hit. Example tests cover the cases a machine reaches too rarely to rely on: allocation order, admission, chunking, preemption order, resumption, prefix sharing, the lookup cap and its first-miss stop, hits at the head of the free queue, aborts in every state and a same-ID re-add during a pending batch.
 
@@ -165,6 +205,8 @@ These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 | Discarded tokens of partial prefills | [`discard_request_mask` in the GPU model runner](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/worker/gpu_model_runner.py) |
 | `WorkloadSpec` lengths and shared prefix | [`vllm bench serve` dataset flags](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/datasets/datasets.py): `--random-input-len`, `--random-prefix-len`, `--prefix-repetition-prefix-len`, `--prefix-repetition-num-prefixes` |
 | `ClosedLoop`, `Poisson` | [`--max-concurrency`, `--request-rate`, `--burstiness`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/serve.py) |
+| Sample fields `kv_usage`, `running`, `waiting` and the prefix counters | [`SchedulerStats`, `PrefixCacheStats`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/metrics/stats.py), built by [`Scheduler.make_stats`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
+| `--max-num-seqs`, `--max-num-batched-tokens`, result keys `max_num_seqs`, `max_num_batched_tokens` | vLLM's flags of the same names, so an engine's configuration can be copied to a replay |
 
 The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
 
@@ -190,8 +232,10 @@ vLLM accepts `long_prefill_token_threshold` with chunked prefill off and still c
 
 For arrivals, `--max-concurrency` with an infinite `--request-rate` is the lab's closed loop. A finite rate draws gamma-distributed gaps, which are exponential with `--burstiness 1`. vLLM delays even the first request by its own gap, then rescales every arrival time so that the last one lands at exactly `num_requests / rate`. The lab's first request arrives at 0.0, since an idle interval before it measures nothing. The lab keeps the gaps unscaled, so the arrivals remain a Poisson process, and the realised rate differs from `rate` only by sampling noise, about `1 / sqrt(num_requests)` relative.
 
+vLLM builds its `SchedulerStats` at the end of `update_from_output`, once finished requests have left the running list and released their blocks, so its gauges show the state between two steps. The simulator samples after `schedule()`, the state a step runs with. Sampled between steps, the blocks and the batch slot of a request would disappear from the samples in the very step that finishes it, and the maximum usage of a run would miss its true peak whenever a request finishes in the fullest step. A simulator sample therefore reads at least as high as a between-steps reading of the same step. vLLM has no cost model: its step durations are measured, the simulator's are estimated from `CostModel`.
+
 ## Planned features
 
-- **Simulation and metrics:** replay workloads step by step with traces and an explicit duration model. The planned sampler must produce the same tokens for a request across preemption and different schedules. Reports must distinguish simulator estimates from engine measurements.
+- **Metrics:** summarize time to first token, time per output token, throughput and cache usage from a result. Reports must distinguish simulator estimates from engine measurements.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

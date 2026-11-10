@@ -1,4 +1,3 @@
-import math
 import sys
 from collections.abc import Callable
 
@@ -15,37 +14,14 @@ from invariants import (
 )
 from kvsim.request import Request
 from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
+from strategies import EOS, configs
 
-EOS = 0
 TOKEN = 1
 MAX_PREFIX = 8
 MAX_SUFFIX = 4
 MAX_OUTPUT = 6
 MAX_COMPUTED_TOKENS = MAX_PREFIX + MAX_SUFFIX + MAX_OUTPUT - 1
 PREFIXES = (tuple(range(100, 100 + MAX_PREFIX)), tuple(range(200, 200 + MAX_PREFIX)))
-
-
-@st.composite
-def configs(draw: st.DrawFn) -> SchedulerConfig:
-    block_size = draw(st.sampled_from([2, 4]))
-    max_blocks_per_request = math.ceil(MAX_COMPUTED_TOKENS / block_size)
-    enable_chunked_prefill = draw(st.booleans())
-    if enable_chunked_prefill:
-        max_tokens_per_step = draw(st.integers(1, 2 * MAX_COMPUTED_TOKENS))
-        long_prefill_token_threshold = draw(st.integers(0, MAX_COMPUTED_TOKENS))
-    else:
-        max_tokens_per_step = draw(st.integers(MAX_COMPUTED_TOKENS, 2 * MAX_COMPUTED_TOKENS))
-        long_prefill_token_threshold = 0
-    return SchedulerConfig(
-        num_blocks=max_blocks_per_request + draw(st.integers(0, 2)),
-        block_size=block_size,
-        max_running_requests=draw(st.integers(2, 4)),
-        max_tokens_per_step=max_tokens_per_step,
-        enable_chunked_prefill=enable_chunked_prefill,
-        long_prefill_token_threshold=long_prefill_token_threshold,
-        enable_prefix_caching=draw(st.booleans()),
-        eos_token_id=EOS,
-    )
 
 
 def expected_output(max_output_tokens: int, eos_position: int) -> list[int]:
@@ -71,7 +47,7 @@ class SchedulerMachine(RuleBasedStateMachine):
         self.operations: list[Operation] = []
         self.results: list[object] = []
 
-    @initialize(config=configs())
+    @initialize(config=configs(MAX_COMPUTED_TOKENS))
     def start(self, config: SchedulerConfig) -> None:
         self.config = config
         self.scheduler = checked_scheduler(config)

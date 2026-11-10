@@ -1,6 +1,7 @@
 import math
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
+from itertools import pairwise
 from typing import NamedTuple, override
 
 from kvsim.block_hash import BlockHash, hash_full_blocks
@@ -8,6 +9,8 @@ from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
 from kvsim.request import Request, RequestStatus
 from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
+from kvsim.simulator import Result
+from kvsim.workload import ClosedLoop, generate_requests, parse_spec
 
 
 class ManagerState(NamedTuple):
@@ -243,3 +246,54 @@ def run_checked_step(
         sampled = [sampled_token_ids[request_id]] if request_id in completing else []
         assert request.output_token_ids == outputs_before[request_id] + sampled
     return batch, finished
+
+
+def check_result(result: Result) -> None:
+    spec = parse_spec(result["workload"])
+    request_specs = generate_requests(spec)
+    config = result["config"]
+    records = result["requests"]
+    samples = result["samples"]
+    assert result["source"] == "simulator"
+    assert result["measured"] is False
+    assert config["kv_tokens"] == config["num_blocks"] * config["block_size"]
+    assert [sample["step"] for sample in samples] == list(range(len(samples)))
+    assert samples[0]["t_s"] == 0.0
+    for earlier, later in pairwise(samples):
+        assert earlier["t_s"] < later["t_s"]
+        assert earlier["preemptions_total"] <= later["preemptions_total"]
+        assert earlier["prefix_queries_total"] <= later["prefix_queries_total"]
+        assert earlier["prefix_hits_total"] <= later["prefix_hits_total"]
+    for sample in samples:
+        assert 0 < sample["kv_usage"] <= 1
+        assert 1 <= sample["running"] <= config["max_num_seqs"]
+        assert sample["waiting"] >= 0
+        assert sample["prefix_hits_total"] <= sample["prefix_queries_total"]
+        num_in_flight = sum(
+            record["arrival_s"] <= sample["t_s"] < record["finish_s"] for record in records
+        )
+        assert sample["running"] + sample["waiting"] == num_in_flight
+    if not config["enable_prefix_caching"]:
+        assert samples[-1]["prefix_queries_total"] == 0
+    step_ends_s: dict[int, float] = {}
+    for record, request_spec in zip(records, request_specs, strict=True):
+        assert record["request_id"] == request_spec.request_id
+        assert record["prompt_tokens"] == len(request_spec.prompt_token_ids)
+        assert record["output_tokens"] == request_spec.output_len
+        assert record["finish_step"] - record["first_token_step"] >= request_spec.output_len - 1
+        assert record["arrival_s"] <= samples[record["first_token_step"]]["t_s"]
+        for step, end_s in (
+            (record["first_token_step"], record["first_token_s"]),
+            (record["finish_step"], record["finish_s"]),
+        ):
+            assert math.isfinite(end_s)
+            assert step_ends_s.setdefault(step, end_s) == end_s
+    for step, end_s in step_ends_s.items():
+        assert samples[step]["t_s"] < end_s
+        assert step + 1 == len(samples) or end_s <= samples[step + 1]["t_s"]
+    arrivals_s = [record["arrival_s"] for record in records]
+    if isinstance(spec.arrival, ClosedLoop):
+        finishes_s = sorted(record["finish_s"] for record in records)
+        assert arrivals_s == ([0.0] * spec.arrival.concurrency + finishes_s)[: len(records)]
+    else:
+        assert arrivals_s == [request_spec.arrival_s for request_spec in request_specs]

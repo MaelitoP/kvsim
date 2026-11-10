@@ -8,6 +8,9 @@ authors = [{ name = "Maël Le Petit" }]
 requires-python = ">=3.12,<3.13"
 dependencies = []
 
+[project.scripts]
+kvsim = "kvsim.__main__:main"
+
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"

@@ -8,11 +8,9 @@ from typing import Any
 
 import pytest
 from hypothesis import given
-from hypothesis import strategies as st
 
 from kvsim.workload import (
     ClosedLoop,
-    LengthRange,
     Poisson,
     RequestSpec,
     WorkloadSpec,
@@ -20,6 +18,7 @@ from kvsim.workload import (
     load_spec,
     parse_spec,
 )
+from strategies import specs
 
 WORKLOADS = Path(__file__).parents[1] / "benchmarks" / "workloads"
 
@@ -46,32 +45,6 @@ SPEC_DATA: dict[str, Any] = {
     "num_prefix_groups": 1,
     "arrival": {"kind": "closed_loop", "concurrency": 2},
 }
-
-LENGTH_RANGES = st.tuples(st.integers(1, 6), st.integers(0, 6)).map(
-    lambda bounds: (bounds[0], bounds[0] + bounds[1])
-)
-
-
-@st.composite
-def specs(draw: st.DrawFn) -> WorkloadSpec:
-    shared_prefix_len = draw(st.integers(0, 6))
-    prompt_len: list[LengthRange] = draw(st.lists(LENGTH_RANGES, min_size=1, max_size=3))
-    return WorkloadSpec(
-        name=draw(st.text()),
-        seed=draw(st.integers(min_value=0)),
-        vocab_size=draw(st.integers(1, 50)),
-        num_requests=draw(st.integers(1, 12)),
-        prompt_len=tuple(prompt_len),
-        output_len=draw(LENGTH_RANGES),
-        shared_prefix_len=shared_prefix_len,
-        num_prefix_groups=draw(st.integers(1, 3)) if shared_prefix_len else 1,
-        arrival=draw(
-            st.one_of(
-                st.builds(ClosedLoop, concurrency=st.integers(1, 8)),
-                st.builds(Poisson, rate=st.floats(0.01, 100)),
-            )
-        ),
-    )
 
 
 def spec_data(**changes: object) -> dict[str, object]:
