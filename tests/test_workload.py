@@ -215,6 +215,7 @@ def test_a_length_is_a_number_a_range_or_a_list_of_ranges(
         (spec_data(arrival={"kind": "poisson", "rate": True}), "rate must be int or float"),
         (spec_data(arrival={"kind": "poisson", "rate": 0}), "rate must be positive and finite"),
         (spec_data(arrival={"kind": "poisson", "rate": math.inf}), "rate must be positive"),
+        (spec_data(arrival={"kind": "poisson", "rate": 10**400}), "rate must be positive"),
         (spec_data(arrival={"kind": "closed_loop", "concurrency": 2, "rate": 1}), "arrival must"),
         (spec_data(arrival={"kind": "poisson", "rate": 1, "concurrency": 2}), "arrival must"),
         (spec_data(arrival={"kind": "burst", "rate": 1}), "arrival must"),

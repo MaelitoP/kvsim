@@ -1,6 +1,6 @@
 import json
-import math
 import random
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from itertools import accumulate
@@ -30,7 +30,7 @@ class Poisson:
     rate: float
 
     def __post_init__(self) -> None:
-        if not 0 < self.rate < math.inf:
+        if not 0 < self.rate <= sys.float_info.max:
             raise ValueError(f"rate must be positive and finite, got {self.rate}")
 
 
