@@ -13,11 +13,12 @@ kvsim models request scheduling and paged KV-cache allocation for a full-attenti
 | `scheduler.py` | Build batches, preempt under memory pressure, apply sampled tokens and abort requests | Waiting queue, running list, live request registry, pending batch, preemption total and prefix-cache counters |
 | `workload.py` | Read a workload spec from JSON and generate its requests deterministically | None |
 | `simulator.py` | Replay a workload through a scheduler, estimate step durations and build the result | None |
-| `__main__.py` | Command line: `kvsim simulate` | None |
+| `metrics.py` | Summarize a result: latencies, throughput, cache usage, preemptions and prefix hit rate | None |
+| `__main__.py` | Command line: `kvsim simulate` and `kvsim summarize` | None |
 
 `BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
-`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig`, the returned `ScheduledBatch`, the workload types `WorkloadSpec`, `ClosedLoop`, `Poisson` and `RequestSpec`, and `CostModel` are frozen dataclasses. A simulation result is a `TypedDict`: it is the content of a JSON file, written and read back as plain dictionaries.
+`Request` and `KVCacheBlock` are mutable dataclasses with identity-based equality. `SchedulerConfig`, the returned `ScheduledBatch`, the workload types `WorkloadSpec`, `ClosedLoop`, `Poisson` and `RequestSpec`, and `CostModel` are frozen dataclasses. A simulation result and its summary are `TypedDict`s: they are the content of a JSON file, written and read back as plain dictionaries.
 
 ### Block allocation
 
@@ -137,6 +138,7 @@ The result has the shape the benchmarks will use for engine measurements, with t
 | `workload` | The spec as `dataclasses.asdict` gives it; `parse_spec` reads it back |
 | `requests` | One record per request, in spec order |
 | `samples` | One record per step |
+| `summary` | The metrics of the run, added by the command line; see Metrics |
 
 A request record holds `request_id`, `arrival_s`, `first_token_s`, `finish_s`, `first_token_step`, `finish_step`, `prompt_tokens`, `output_tokens`, and `server_ttft_ms` and `server_queue_ms`, which only an engine reports and are `null` here. `first_token_s` and `finish_s` are the clock at the end of the steps that sampled the request's first and last tokens; the two step fields are simulator only.
 
@@ -144,9 +146,41 @@ A sample holds `step`, `t_s`, `kv_usage`, `running`, `waiting`, `preemptions_tot
 
 The same spec, configuration and cost model give the same result, and the same bytes once written: the clock adds the same floating-point durations in the same order, and no ordering depends on the string hash seed.
 
+### Metrics
+
+`summarize(result)` reduces a result to the figures that tables compare. It reads `requests` and `samples` and nothing else, so one function serves a simulator result and an engine measurement, in memory or decoded from a file. It takes plain data and checks what it reads, as `parse_spec` does. There must be at least one request. Each request needs finite times with `arrival_s <= first_token_s <= finish_s` and at least one output token. Each sample needs `kv_usage`, `preemptions_total`, `prefix_queries_total` and `prefix_hits_total`, any of which may be `null`. A usage must lie between 0 and 1, so a usage above 1, such as a percentage, is refused; the counters must be integers of at least zero, with no more hits than queries. A boolean is not a number. The run must last longer than zero seconds, and every figure of the summary must be finite: times so large that a sum or a percentile overflows, or so close together that a rate does, are refused. Anything else raises `ValueError`.
+
+Three metrics are computed per request:
+
+| Metric | Definition |
+| --- | --- |
+| Time to first token (TTFT) | `first_token_s - arrival_s`: queueing, prefill and any recomputation after a preemption that came before the first token |
+| Time per output token (TPOT) | `(finish_s - first_token_s) / (output_tokens - 1)`, the mean gap between tokens after the first; undefined for a one-token output |
+| End-to-end latency (E2E) | `finish_s - arrival_s` |
+
+The summary holds:
+
+| Key | Content |
+| --- | --- |
+| `num_requests`, `output_tokens` | Totals over the requests |
+| `duration_s` | Latest `finish_s` minus earliest `arrival_s` |
+| `requests_per_s`, `output_tokens_per_s` | The totals divided by the duration |
+| `ttft_s`, `tpot_s`, `e2e_s` | `mean`, `p50`, `p95` and `p99` over the requests; `tpot_s` leaves out one-token outputs and is `null` when no request generated a second token |
+| `kv_usage_mean`, `kv_usage_max` | Over the samples that have a usage; `null` when none has |
+| `preemptions` | The last `preemptions_total` reading; `null` without one |
+| `prefix_hit_rate` | `prefix_hits_total / prefix_queries_total` from the last sample that has both and at least one query, a ratio of tokens; `null` otherwise, which includes every run without prefix caching |
+
+Percentiles come from `statistics.quantiles` with `method="inclusive"`. It interpolates linearly between the sorted values and treats them as the whole population, which a run's requests are: the 0th percentile is the minimum, the 100th the maximum, and no percentile leaves the observed range by more than floating-point rounding, which also applies to the mean. The default exclusive method assumes a sample from a larger population and can extrapolate past the largest value. A single value is its own mean and percentiles.
+
+The usage mean is not weighted by time. A simulator result has one sample per step, whatever the step's estimated duration, so a short decode step counts as much as a long prefill step. Maximum usage does not depend on the sampling and is the figure to compare between results. The counters are read as totals of the run: the summary takes the last reading, not a difference, because a simulator's first sample already counts the admissions of step 0. A result must therefore hold counters that start at zero with the run, as the simulator's do. A writer whose engine counts since it started must subtract the reading it took before the run.
+
+The seconds of a summary are what the result holds: estimates for a simulator result, measurements for an engine's. The summary does not repeat the `measured` flag of its result; whatever prints a summary must show it.
+
 ### Command line
 
-`kvsim simulate <spec.json> --num-blocks N --out <result.json>`, or `python -m kvsim` with the same arguments, runs one simulation and writes the result as indented UTF-8 JSON, creating the parent directories of the output. `--block-size`, `--max-num-seqs`, `--max-num-batched-tokens`, `--long-prefill-token-threshold`, `--enable-prefix-caching` and `--enable-chunked-prefill`, each of the last two with its `--no-enable-...` form, set the scheduler configuration and default to `SchedulerConfig`'s defaults. `--cost-step-overhead-s`, `--cost-prefill-s-per-token` and `--cost-decode-s-per-seq` set the cost model. A spec that cannot be read, an invalid configuration or cost model, a request the cache could never hold, a result with a time too large for a float and an output path that cannot be written are reported as usage errors with exit status 2, and no result is written. JSON has no infinity, so a non-finite time is refused rather than written.
+`kvsim simulate <spec.json> --num-blocks N --out <result.json>`, or `python -m kvsim` with the same arguments, runs one simulation and writes the result with its summary as indented UTF-8 JSON, creating the parent directories of the output. `--block-size`, `--max-num-seqs`, `--max-num-batched-tokens`, `--long-prefill-token-threshold`, `--enable-prefix-caching` and `--enable-chunked-prefill`, each of the last two with its `--no-enable-...` form, set the scheduler configuration and default to `SchedulerConfig`'s defaults. `--cost-step-overhead-s`, `--cost-prefill-s-per-token` and `--cost-decode-s-per-seq` set the cost model. A spec that cannot be read, an invalid configuration or cost model, a request the cache could never hold, a result with times too large or too close together to summarize and an output path that cannot be written are reported as usage errors with exit status 2, and no result is written. JSON has no infinity, so a non-finite time is refused rather than written.
+
+`kvsim summarize <result.json>...` prints a table with one row per file: the file, its `source`, whether its times are `measured` or `estimated`, the number of requests, the median and 95th percentile of TTFT and TPOT in milliseconds, output tokens and requests per second, mean and maximum cache usage, preemptions and the prefix hit rate. Columns that print a summary value as it is carry its key. A value the summary does not have prints as `-`. The summary is computed from the file's requests and samples, not read from its `summary`, so a file without one works and a stale one is ignored. When a row is estimated, a line under the table says that its seconds come from the cost model of the run and only compare between runs made with the same cost model. A file that cannot be read, is not a result or cannot be summarized is a usage error with exit status 2 that names the file.
 
 ## Invariants and where they are checked
 
@@ -177,6 +211,8 @@ The helpers live in `tests/invariants.py`, except the machines. `tests/strategie
 | A simulation follows its spec: one record per request in spec order, with the spec's prompt and output lengths. A request generates at most one token per step and arrives no later than the start of its first-token step. A step number maps to one end time, after that step's start and no later than the next step's start. | `check_result` |
 | Samples are numbered from zero, one per step, at strictly increasing times that start at 0.0. Each schedules at least one request, within the running limit, and uses part of the cache. Counters never decrease, and prefix hits never exceed queries. `running + waiting` equals the number of requests that have arrived and not finished at the sample's time. | `check_result` |
 | A closed loop keeps exactly `concurrency` requests in flight while requests remain: the first `concurrency` arrive at 0.0 and each later one arrives at the next finish time, in order. Poisson requests keep the arrival times of their spec. | `check_result` |
+| A summary agrees with its result: the request and token counts, the duration, the maximum usage, the last preemption total and the last sample's ratio of prefix hits to queries, `null` without prefix caching. For TTFT, E2E and TPOT, the minimum, `p50`, `p95`, `p99` and the maximum are in ascending order and the mean lies within the range, up to rounding; so does the mean usage. Each E2E statistic is at least its TTFT counterpart. TPOT statistics exist exactly when a request generated a second token. Every simulator result can be summarized, and the file the command line writes stores exactly that summary. | `check_summary`, `tests/test_simulator.py` |
+| Summary values match a hand computation on three requests, one of them with a single output token. A gauge without a reading gives `null`, and the last reading wins. A result with a wrong value, or with times too large or too close together to summarize, is refused. | `tests/test_metrics.py` |
 | The same spec, configuration and cost model give the same result in one process, and byte-identical files from two processes with different string hash seeds. No result holds token IDs, so the files guard orderings; pinned values guard the sampled token itself, a fixed function of the request ID and the output position that is never EOS. | `tests/test_simulator.py` |
 
 Two hypothesis machines drive these helpers. `BlockPoolMachine` in `tests/test_block_pool.py` mixes allocate, release, retain, cache and reset on one pool and checks each rule's effect on allocation order, eviction and the map against the state before the rule. `SchedulerMachine` in `tests/test_stateful.py` draws a configuration, then mixes arrivals of one to three requests, steps that may abort a request while the batch is pending, and aborts of live, finished and unknown IDs. The configuration covers prefix caching on and off, chunked prefill on and off with or without a long-prefill threshold, block sizes 2 and 4, and pools between one request's maximum and two blocks more, so preemption is frequent. Prompts take a block-aligned slice of one of two shared prefixes, so caching examples hit. Example tests cover the cases a machine reaches too rarely to rely on: allocation order, admission, chunking, preemption order, resumption, prefix sharing, the lookup cap and its first-miss stop, hits at the head of the free queue, aborts in every state and a same-ID re-add during a pending batch.
@@ -206,6 +242,8 @@ These comparisons use vLLM revision `8122776fba2dcfae2973a0659db2da6ac688306b`.
 | `WorkloadSpec` lengths and shared prefix | [`vllm bench serve` dataset flags](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/datasets/datasets.py): `--random-input-len`, `--random-prefix-len`, `--prefix-repetition-prefix-len`, `--prefix-repetition-num-prefixes` |
 | `ClosedLoop`, `Poisson` | [`--max-concurrency`, `--request-rate`, `--burstiness`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/serve.py) |
 | Sample fields `kv_usage`, `running`, `waiting` and the prefix counters | [`SchedulerStats`, `PrefixCacheStats`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/metrics/stats.py), built by [`Scheduler.make_stats`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/v1/core/sched/scheduler.py) |
+| `summarize`: TTFT, TPOT, E2E, throughput and percentiles | [`calculate_metrics` of `vllm bench serve`](https://github.com/vllm-project/vllm/blob/8122776fba2dcfae2973a0659db2da6ac688306b/vllm/benchmarks/serve.py) |
+| `prefix_hit_rate`, `preemptions` | Ratio of `vllm:prefix_cache_hits_total` to `vllm:prefix_cache_queries_total`, and `vllm:num_preemptions_total` |
 | `--max-num-seqs`, `--max-num-batched-tokens`, result keys `max_num_seqs`, `max_num_batched_tokens` | vLLM's flags of the same names, so an engine's configuration can be copied to a replay |
 
 The lab uses one token budget; this vLLM revision can distinguish scheduled tokens from the input budget. vLLM advances computed-token counts in `_update_after_schedule`; the lab advances them when completing the batch.
@@ -234,8 +272,10 @@ For arrivals, `--max-concurrency` with an infinite `--request-rate` is the lab's
 
 vLLM builds its `SchedulerStats` at the end of `update_from_output`, once finished requests have left the running list and released their blocks, so its gauges show the state between two steps. The simulator samples after `schedule()`, the state a step runs with. Sampled between steps, the blocks and the batch slot of a request would disappear from the samples in the very step that finishes it, and the maximum usage of a run would miss its true peak whenever a request finishes in the fullest step. A simulator sample therefore reads at least as high as a between-steps reading of the same step. vLLM has no cost model: its step durations are measured, the simulator's are estimated from `CostModel`.
 
+`vllm bench serve` defines TTFT, TPOT and end-to-end latency as the lab does, also leaving one-token outputs out of TPOT, and computes percentiles with NumPy's default linear interpolation, which is the inclusive method. A summary of an engine measurement is therefore comparable with that tool's report. It divides throughput by the wall time of the whole benchmark; the lab divides by the span from the first arrival to the last finish, which is the same interval for a run that starts with its first request. It also reports inter-token latencies and standard deviations. A result has no per-token times, so the lab reports TPOT only.
+
 ## Planned features
 
-- **Metrics:** summarize time to first token, time per output token, throughput and cache usage from a result. Reports must distinguish simulator estimates from engine measurements.
+- **Benchmarks:** a load client that submits the same workloads to vLLM and LMDeploy and writes its measurements in the result format, so one summary and one table serve both.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

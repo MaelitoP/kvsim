@@ -4,9 +4,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from itertools import pairwise
 from typing import NamedTuple, override
 
+import pytest
+
+from kvsim.__main__ import main
 from kvsim.block_hash import BlockHash, hash_full_blocks
 from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
+from kvsim.metrics import LatencyStats, Summary
 from kvsim.request import Request, RequestStatus
 from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
 from kvsim.simulator import Result
@@ -297,3 +301,57 @@ def check_result(result: Result) -> None:
         assert arrivals_s == ([0.0] * spec.arrival.concurrency + finishes_s)[: len(records)]
     else:
         assert arrivals_s == [request_spec.arrival_s for request_spec in request_specs]
+
+
+def check_summary(result: Result, summary: Summary) -> None:
+    records = result["requests"]
+    samples = result["samples"]
+    assert summary["num_requests"] == len(records)
+    assert summary["output_tokens"] == sum(record["output_tokens"] for record in records)
+    assert summary["duration_s"] == max(record["finish_s"] for record in records) - min(
+        record["arrival_s"] for record in records
+    )
+    ttft_s = summary["ttft_s"]
+    e2e_s = summary["e2e_s"]
+    tpot_s = summary["tpot_s"]
+    check_latency_stats(
+        ttft_s, [record["first_token_s"] - record["arrival_s"] for record in records]
+    )
+    check_latency_stats(e2e_s, [record["finish_s"] - record["arrival_s"] for record in records])
+    assert all(e2e_s[key] >= ttft_s[key] for key in ("mean", "p50", "p95", "p99"))
+    tpots_s = [
+        (record["finish_s"] - record["first_token_s"]) / (record["output_tokens"] - 1)
+        for record in records
+        if record["output_tokens"] > 1
+    ]
+    assert (tpot_s is None) == (not tpots_s)
+    if tpot_s is not None:
+        check_latency_stats(tpot_s, tpots_s)
+    kv_usages = [sample["kv_usage"] for sample in samples]
+    assert summary["kv_usage_max"] == max(kv_usages)
+    assert summary["kv_usage_mean"] is not None
+    assert_ascending(min(kv_usages), summary["kv_usage_mean"], max(kv_usages))
+    assert summary["preemptions"] == samples[-1]["preemptions_total"]
+    if result["config"]["enable_prefix_caching"]:
+        assert summary["prefix_hit_rate"] == (
+            samples[-1]["prefix_hits_total"] / samples[-1]["prefix_queries_total"]
+        )
+    else:
+        assert summary["prefix_hit_rate"] is None
+
+
+def check_latency_stats(stats: LatencyStats, values: list[float]) -> None:
+    assert_ascending(min(values), stats["p50"], stats["p95"], stats["p99"], max(values))
+    assert_ascending(min(values), stats["mean"], max(values))
+
+
+def assert_ascending(*values: float) -> None:
+    for low, high in pairwise(values):
+        assert low <= high or math.isclose(low, high)
+
+
+def check_usage_error(argv: list[str], capsys: pytest.CaptureFixture[str], message: str) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(argv)
+    assert raised.value.code == 2
+    assert message in capsys.readouterr().err

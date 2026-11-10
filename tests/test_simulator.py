@@ -10,9 +10,10 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from invariants import check_result
+from invariants import check_result, check_summary, check_usage_error
 from kvsim import __version__
 from kvsim.__main__ import main
+from kvsim.metrics import summarize
 from kvsim.request import Request
 from kvsim.scheduler import SchedulerConfig
 from kvsim.simulator import CostModel, _sample_token, simulate
@@ -42,13 +43,6 @@ def simulate_argv(directory: Path, spec: WorkloadSpec, out_path: Path, flags: st
     spec_path = directory / "spec.json"
     spec_path.write_text(json.dumps(asdict(spec)), encoding="utf-8")
     return ["simulate", str(spec_path), "--out", str(out_path), *flags.split()]
-
-
-def check_usage_error(argv: list[str], capsys: pytest.CaptureFixture[str], message: str) -> None:
-    with pytest.raises(SystemExit) as raised:
-        main(argv)
-    assert raised.value.code == 2
-    assert message in capsys.readouterr().err
 
 
 def test_a_closed_loop_run_matches_hand_computed_steps_and_times() -> None:
@@ -143,6 +137,7 @@ def test_every_simulation_follows_its_spec(spec: WorkloadSpec, data: st.DataObje
     config = data.draw(configs(max_prompt_len + spec.output_len[1] - 1))
     result = simulate(spec, config, COST)
     check_result(result)
+    check_summary(result, summarize(result))
     assert parse_spec(result["workload"]) == spec
     assert simulate(spec, config, COST) == result
 
@@ -241,6 +236,7 @@ def test_cli_flags_set_the_scheduler_config_and_the_cost_model(
     main(simulate_argv(tmp_path, SPEC, out_path, flags))
     result = json.loads(out_path.read_text(encoding="utf-8"))
     check_result(result)
+    assert result.pop("summary") == summarize(result)
     del result["requests"], result["samples"]
     assert result == {
         "source": "simulator",
@@ -264,7 +260,8 @@ def test_cli_flags_set_the_scheduler_config_and_the_cost_model(
             "long_prefill_token_threshold requires enable_chunked_prefill",
         ),
         ("--num-blocks 8 --cost-step-overhead-s 0", "step_overhead_s must be > 0"),
-        ("--num-blocks 8 --cost-step-overhead-s 1e308", "Out of range float values"),
+        ("--num-blocks 8 --cost-step-overhead-s 1e308", "'finish_s': inf"),
+        ("--num-blocks 8 --cost-step-overhead-s 4e306", "too large or too close together"),
     ],
 )
 def test_the_cli_rejects_a_run_it_cannot_simulate_or_write_as_json(
