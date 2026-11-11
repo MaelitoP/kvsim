@@ -2,7 +2,7 @@
 
 kvsim models request scheduling and paged KV-cache allocation for a full-attention inference engine. It does not run a model or store KV tensors. Given the same request arrivals and sampled tokens, it produces the same batches and block assignments. It has no runtime dependencies and does not read the wall clock.
 
-A load client under `benchmarks/` submits the same workloads to a real engine and writes its measurements in the simulator's result format. It is a script outside the package, with its own dependencies, and the only code here that reads a clock.
+A load client under `benchmarks/` submits the same workloads to a real engine and writes its measurements in the simulator's result format. It is a script outside the package, with its own dependencies, and the only code here that reads a clock. Shell scripts beside it start vLLM and LMDeploy with comparable configurations and run the client over a matrix of scenarios.
 
 ## Components and ownership
 
@@ -18,6 +18,8 @@ A load client under `benchmarks/` submits the same workloads to a real engine an
 | `metrics.py` | Summarize a result: latencies, throughput, cache usage, preemptions and prefix hit rate | None |
 | `__main__.py` | Command line: `kvsim simulate` and `kvsim summarize` | None |
 | `benchmarks/client.py` | Measure a running engine under a workload: text prompts, streamed completions, metric scrapes | None |
+| `benchmarks/run_matrix.sh` | Run the benchmark matrix for one engine: start it, check its cache size, run the client, keep the log | The engine container |
+| `benchmarks/engines/vllm.sh`, `lmdeploy.sh` | Build one engine's launch command for a cell and read its cache size from its log | None |
 
 `BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
@@ -187,7 +189,7 @@ The seconds of a summary are what the result holds: estimates for a simulator re
 
 ## Load client
 
-`benchmarks/client.py` measures an engine that serves the OpenAI completions API, vLLM or LMDeploy, under a workload spec. It needs `httpx` and `tokenizers` from the `bench` dependency group, which `uv sync` installs with the development tools so that the client is linted, type-checked and tested like the package. It never starts an engine: the engine's version, launch command and cache configuration are arguments, copied into the result.
+`benchmarks/client.py` measures an engine that serves the OpenAI completions API, vLLM or LMDeploy, under a workload spec. It needs `httpx` and `tokenizers` from the `bench` dependency group, which `uv sync` installs with the development tools so that the client is linted, type-checked and tested like the package. It never starts an engine: the engine's version, launch command and cache configuration are arguments, copied into the result. `benchmarks/run_matrix.sh` starts the engines and supplies those arguments; see Benchmark runs.
 
 ### Prompts
 
@@ -228,6 +230,73 @@ The engines do not count the same things. vLLM's usage is the share of blocks th
 
 An engine result has `source` set to the engine, `measured` set to `true`, the engine's version, model and GPU, and the launch command in `config.command`. It has no `cost_model`, its requests have no `first_token_step` and `finish_step`, and its samples have no `step`: an engine does not expose its steps. `summarize` and `kvsim summarize` read it like a simulator result.
 
+## Benchmark runs
+
+`benchmarks/run_matrix.sh <vllm|lmdeploy> [scenario ...]` measures one engine on a Linux host with one NVIDIA GPU, Docker and the NVIDIA container toolkit. Without scenarios it runs all five. So far `short_low` has been measured, three runs per engine on an NVIDIA L4, and every other cell has been started once on both engines without requests, which confirmed its flags and its cache size. The engine facts below were read from the sources of the pinned versions, vLLM v0.32.0 and LMDeploy v0.18.0, then checked against those launches, and the scripts check the ones a run depends on at every launch.
+
+### Fixed settings
+
+Both engines serve `Qwen/Qwen2.5-3B-Instruct` at one pinned revision in bfloat16, from images pinned by tag and digest. The image is not configurable: another image is an edit of the engine script, so a result's `engine_version` always names the image that ran. The model has 36 layers, 2 key-value heads and a head dimension of 128, so a token takes 36,864 bytes of cache and a block of 64 tokens 2,359,296 bytes.
+
+| Setting | vLLM | LMDeploy, TurboMind backend |
+| --- | --- | --- |
+| Block size, 64 tokens | `--block-size` | `--cache-block-seq-len` |
+| Longest sequence, 4096 tokens | `--max-model-len` | `--session-len` |
+| Running requests, 64 | `--max-num-seqs` | `--max-batch-size` |
+| Tokens per step, 2048 | `--max-num-batched-tokens`, shared by prefill and decode | `--max-prefill-token-num`, prefill only: a pass also takes one token per running request |
+| Cache size | `--kv-cache-memory-bytes` | `--cache-max-entry-count`, a share of free memory |
+| Prefix caching | `--enable-prefix-caching`, `--no-enable-prefix-caching` | `--enable-prefix-caching`, off without it |
+| Chunked prefill | `--enable-chunked-prefill`, `--no-enable-chunked-prefill` | Always on |
+| Long-prefill threshold | `--long-prefill-token-threshold` | None |
+
+vLLM also runs with `--seed 0` and `--enable-per-request-metrics`, which gives the client the server-side times. LMDeploy runs with `--quant-policy 0`, so its cache is not quantized. Everything else is the engine's default. One default is not known to be the same on both: the model's `generation_config.json` sets a repetition penalty of 1.05, which vLLM reports applying to every request, and LMDeploy's log does not say whether it does. The client asks for a temperature of 0 and a fixed output length, so the penalty cannot change the lengths, only the work per sampled token.
+
+### Cells
+
+A cell is one configuration. `set_cell` in `run_matrix.sh` is the only definition of the cells, and each engine script turns the cell's variables into its own flags.
+
+| Cell | Differs from `baseline` by | Engines |
+| --- | --- | --- |
+| `baseline` | Prefix caching on, chunked prefill on, large cache | Both |
+| `no_prefix_caching` | Prefix caching off | Both |
+| `no_chunked_prefill` | Chunked prefill off, and 4096 tokens per step, since a prompt must then fit one step | vLLM |
+| `long_prefill_512` | Long-prefill threshold of 512 tokens | vLLM |
+| `tight` | Small cache | Both |
+| `tight_no_prefix_caching` | Small cache, prefix caching off | Both |
+| `tight_sim_aligned` | Small cache, `--no-scheduler-reserve-full-isl` and `--no-async-scheduling` | vLLM |
+
+| Scenario | Cells |
+| --- | --- |
+| `short_low` | `baseline` |
+| `long_high` | `baseline`, `tight` |
+| `shared_prefix` | `baseline`, `no_prefix_caching` |
+| `mixed` | `baseline`, `no_chunked_prefill`, `long_prefill_512` |
+| `saturation` | `baseline`, `tight`, `tight_no_prefix_caching`, `tight_sim_aligned` |
+
+That is 12 cells on vLLM and 9 on LMDeploy, three runs each.
+
+vLLM v0.32.0 has two defaults the simulator lacks. With `scheduler_reserve_full_isl`, a request is admitted only when its whole input fits the free cache, where the simulator admits on the first chunk. With async scheduling, the next step is scheduled before the previous one has returned. LMDeploy also executes asynchronously by default. Every cell but one keeps the defaults, so the measurements describe the engines as they are run. `tight_sim_aligned` turns both vLLM features off, which is the closest vLLM gets to the simulator. Comparing it with `tight` shows what the two defaults change together, not which of them changes it, and LMDeploy has no such cell.
+
+### Cache budgets
+
+The large budget is 2044 blocks, 130,816 tokens, and the tight one 252 blocks, 16,128 tokens. Both engines get the same counts, and a simulator replay uses the count stored in the result.
+
+The counts come from LMDeploy. TurboMind takes its cache size as a share, between 0 and 1, of the GPU memory that is free when the engine is created, and refuses a block count. It cuts that region into pages of 32 MiB and allocates blocks from slabs. For this model a slab is one page and holds 14 blocks of 2.25 MiB, so a region of `p` pages holds `14 * p` blocks, and only multiples of 14 are reachable: 146 pages for 2044 blocks and 18 for 252.
+
+`lmdeploy.sh` therefore starts the engine once to calibrate. That launch logs at `INFO`, where TurboMind prints the free memory it found. Every later launch asks for the share that gives its pages plus half a page, so the block count stays the same while free memory moves by less than half a page, 16 MiB, in either direction. On the L4, the four launches that printed it found the same free memory, 15,805.12 MiB. With `TM_CACHE_LOG_INTERVAL` set, TurboMind prints its page count and slab geometry at startup, and `engine_num_blocks` computes the block count from that report. A log that shows another page size, block size, slab size or slab capacity is rejected, and so is a log without the report, which also catches a fallback to LMDeploy's PyTorch backend. A budget that does not fit the free memory is rejected before the launch.
+
+vLLM takes bytes. It keeps one block of its cache as a null block that no request can use, so `vllm.sh` asks for one block more than the budget. vLLM prints its cache size in tokens, null block included, and `engine_num_blocks` converts it back to usable blocks, rejecting a size that is not a whole number of blocks. It printed 130,880 and 16,192 tokens for the two budgets, 2045 and 253 blocks: a block's bytes are not padded for this model.
+
+Before the first request of a run, `run_matrix.sh` compares the count read from the log with the cell's budget and stops when they differ: a cell that ran with another cache size is not that cell. The count passed to the client, and stored as `config.num_blocks`, is the one read from the log.
+
+### One run
+
+For each scenario, cell and run, `run_matrix.sh` starts the engine in a new container, waits up to 15 minutes for `/health`, checks the cache size, runs the client, saves the engine log and removes the container. On the L4, vLLM answers `/health` after about 66 seconds and LMDeploy after about 11, once the image and the model are on the host. The engine's port is published on the loopback interface only, so nothing outside the host can add load or fill the prefix cache during a run. `HF_HOME` must be an absolute path: Docker would take a relative one for a named volume. The engine is restarted before every run because the three runs of a cell send the same prompts: on one engine instance, the second run would find the first one's blocks in the prefix cache. The client then warms each fresh instance with other prompts.
+
+A run writes `results/<engine>/<scenario>.<cell>.run<k>.json` and the engine log under the same name with `.log`. The result is written under a temporary name and renamed when the client succeeds, and a run whose result exists is skipped, so an interrupted matrix resumes where it stopped. When a run fails, because the engine exits during startup, holds another cache size or the client fails, the engine log is saved as `results/<engine>/failure.log` and the script stops; the next invocation removes that file.
+
+The launch command stored in `config.command` is the `docker run` command that started the container. `results/<engine>/README.txt` is written at each invocation with the GPU, driver and CUDA versions the host reports, the image, the model revision and the date. The client builds its prompts with the `tokenizer.json` of the pinned model revision, downloaded once to `kvsim` under `$XDG_CACHE_HOME`, `~/.cache` by default, and scrapes the metrics every second; neither is stored in a result.
+
 ## Invariants and where they are checked
 
 The helpers live in `tests/invariants.py`, except the machines. `tests/strategies.py` holds the hypothesis strategies for workload specs and scheduler configurations that several test modules share. `check_scheduler` calls `check_manager`, which calls `check_pool`. `run_checked_step` drives one step and calls `check_scheduler` after its `schedule()`, `finish_requests` and `complete_step`; the scheduler tests run their steps through it, and some also call the scheduler directly to test rejected calls. The machines call their checker after every rule.
@@ -262,6 +331,7 @@ The helpers live in `tests/invariants.py`, except the machines. `tests/strategie
 | A text prompt tokenizes to within one token of its request's prompt length, and the prompts of a group share a text that tokenizes to within one token of the prefix length. The bound belongs to the test tokenizer, whose decoded tokens merge or split by one token at a time; the Qwen2.5 figures are in the Load client section. | `tests/test_client.py` |
 | A measurement follows its spec: one record per request in spec order with the requested output length and `arrival_s <= first_token_s <= finish_s`. Samples start at 0.0 with zeroed counters, at strictly increasing times, the last one no earlier than the last finish; a counter that has a reading keeps one and never decreases. In a closed loop, each request after the first `concurrency` arrives no earlier than a finish; a Poisson request is sent no earlier than its arrival. Every measurement can be summarized. | `check_measurement` |
 | A closed loop opens exactly `concurrency` requests at once while that many remain, and Poisson arrivals are not limited: a fake engine holds each stream until the expected number of requests are open. A Poisson request is sent at its arrival time on a fake clock. The warm-up sends the next seed's prompts before the measured ones and is not recorded. Counters count the measured pass only, and one that appears late counts from zero. A sample reads each engine's metrics under the names pinned in a literal exposition. A missing metric is `null`. A failed, truncated or shortened request fails the run, in the warm-up or in the measured pass. The file the client's command line writes is summarized by `kvsim summarize` as measured. | `tests/test_client.py` |
+| An engine's block count is read from its startup log: vLLM's token count less the null block, TurboMind's page count times the blocks a page holds, and a log without the expected report is rejected. Each engine's baseline launch command is pinned whole, and a cell's command is the baseline's with that cell's arguments replaced. On a fake host, where `docker`, `curl`, `nvidia-smi` and `uv` are stand-ins, a scenario starts the engine once per run, calls the client with exactly the workload, launch command, block count read from the log and configuration of its cell, keeps the log, and skips existing results when run again. The whole matrix runs each engine's supported cells three times. An engine that exits during startup or holds another cache size is stopped before the first request, a failed client leaves no result, and both leave the engine log. | `tests/test_engines.py` |
 | The same spec, configuration and cost model give the same result in one process, and byte-identical files from two processes with different string hash seeds. No result holds token IDs, so the files guard orderings; pinned values guard the sampled token itself, a fixed function of the request ID and the output position that is never EOS. | `tests/test_simulator.py` |
 
 Two hypothesis machines drive these helpers. `BlockPoolMachine` in `tests/test_block_pool.py` mixes allocate, release, retain, cache and reset on one pool and checks each rule's effect on allocation order, eviction and the map against the state before the rule. `SchedulerMachine` in `tests/test_stateful.py` draws a configuration, then mixes arrivals of one to three requests, steps that may abort a request while the batch is pending, and aborts of live, finished and unknown IDs. The configuration covers prefix caching on and off, chunked prefill on and off with or without a long-prefill threshold, block sizes 2 and 4, and pools between one request's maximum and two blocks more, so preemption is frequent. Prompts take a block-aligned slice of one of two shared prefixes, so caching examples hit. Example tests cover the cases a machine reaches too rarely to rely on: allocation order, admission, chunking, preemption order, resumption, prefix sharing, the lookup cap and its first-miss stop, hits at the head of the free queue, aborts in every state and a same-ID re-add during a pending batch.
@@ -325,6 +395,6 @@ vLLM builds its `SchedulerStats` at the end of `update_from_output`, once finish
 
 ## Planned features
 
-- **Benchmarks:** scripts that launch vLLM and LMDeploy with comparable configurations and run the load client over a matrix of scenarios, then an analysis that tabulates the results and compares each measurement with a simulator replay.
+- **Benchmarks:** the rest of the matrix, of which only `short_low` is measured, then an analysis that tabulates the results and compares each measurement with a simulator replay.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

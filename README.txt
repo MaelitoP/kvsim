@@ -10,11 +10,21 @@ Print the summaries of one or more results as a table, one row per file:
 
     uv run kvsim summarize results/simulator/shared_prefix.json
 
-benchmarks/client.py measures a running vLLM or LMDeploy server under the same workloads and writes its measurements in the same result format, so the summary table reads both. It turns the token IDs of a workload into text prompts of the same length, sends the scenario once with other prompts to warm the engine up, then once more for the record, and reads the engine's metrics every second. The engine's version, launch command and cache configuration are arguments, since the client does not start the engine; the scripts that do are not written yet. With vLLM listening on port 8000:
+benchmarks/client.py measures a running vLLM or LMDeploy server under the same workloads and writes its measurements in the same result format, so the summary table reads both. It turns the token IDs of a workload into text prompts of the same length, sends the scenario once with other prompts to warm the engine up, then once more for the record, and reads the engine's metrics every second. The engine's version, launch command and cache configuration are arguments, since the client does not start the engine. With vLLM listening on port 8000:
 
     uv run python benchmarks/client.py benchmarks/workloads/short_low.json --engine vllm --base-url http://localhost:8000 --model Qwen/Qwen2.5-3B-Instruct --engine-version 0.32.0 --gpu "NVIDIA L4" --command "vllm serve Qwen/Qwen2.5-3B-Instruct" --num-blocks 2048 --block-size 64 --max-num-seqs 64 --max-num-batched-tokens 2048 --enable-prefix-caching --enable-chunked-prefill --out results/vllm/short_low.json
 
-See ARCHITECTURE.md for the scheduling example, state ownership, contracts, the result format, the load client and vLLM references.
+benchmarks/run_matrix.sh starts the engines and runs the client over the whole benchmark matrix: for each scenario and configuration, three runs, each on a freshly started engine. It pins the Docker images, the model revision and the cache size, 2044 or 252 blocks of 64 tokens on both engines, reads the cache size back from the engine log before every run and stops if it is not the expected one. It needs a Linux host with one NVIDIA GPU of about 24 GB, Docker and the NVIDIA container toolkit. So far only the first scenario, short_low, has been measured: three runs per engine on an NVIDIA L4, under results, where vLLM and LMDeploy land within 2% of each other. On such a host, with HF_HOME naming the directory where the model is downloaded:
+
+    git clone https://github.com/MaelitoP/kvsim.git && cd kvsim
+    uv sync
+    export HF_HOME=$HOME/hf
+    benchmarks/run_matrix.sh vllm
+    benchmarks/run_matrix.sh lmdeploy
+
+One scenario is enough to try it: benchmarks/run_matrix.sh vllm short_low. Results and engine logs are written under results, one directory per engine, and a run whose result exists is skipped, so an interrupted matrix can be started again.
+
+See ARCHITECTURE.md for the scheduling example, state ownership, contracts, the result format, the load client, the benchmark matrix and vLLM references.
 
 Development requires Python 3.12 and uv. Sync the environment and run lint, type checks and tests with:
 

@@ -15,6 +15,7 @@ test:
 lint:
 	$(UV) run ruff check
 	$(UV) run ruff format --check
+	$(UV) run shellcheck benchmarks/run_matrix.sh benchmarks/engines/*.sh
 
 fmt:
 	$(UV) run ruff check --fix
