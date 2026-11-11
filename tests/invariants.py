@@ -2,7 +2,7 @@ import math
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from itertools import pairwise
-from typing import NamedTuple, override
+from typing import Any, NamedTuple, override
 
 import pytest
 
@@ -10,11 +10,11 @@ from kvsim.__main__ import main
 from kvsim.block_hash import BlockHash, hash_full_blocks
 from kvsim.block_pool import BlockPool, KVCacheBlock
 from kvsim.kv_cache_manager import KVCacheManager
-from kvsim.metrics import LatencyStats, Summary
+from kvsim.metrics import LatencyStats, Summary, summarize
 from kvsim.request import Request, RequestStatus
 from kvsim.scheduler import ScheduledBatch, Scheduler, SchedulerConfig
 from kvsim.simulator import Result
-from kvsim.workload import ClosedLoop, generate_requests, parse_spec
+from kvsim.workload import ClosedLoop, WorkloadSpec, generate_requests, parse_spec
 
 
 class ManagerState(NamedTuple):
@@ -355,3 +355,32 @@ def check_usage_error(argv: list[str], capsys: pytest.CaptureFixture[str], messa
         main(argv)
     assert raised.value.code == 2
     assert message in capsys.readouterr().err
+
+
+def check_measurement(
+    spec: WorkloadSpec, records: Sequence[Mapping[str, Any]], samples: Sequence[Mapping[str, Any]]
+) -> None:
+    request_specs = generate_requests(spec)
+    for record, request_spec in zip(records, request_specs, strict=True):
+        assert record["request_id"] == request_spec.request_id
+        assert record["output_tokens"] == request_spec.output_len
+        assert 0.0 <= record["arrival_s"] <= record["first_token_s"] <= record["finish_s"]
+    counters = ("preemptions_total", "prefix_queries_total", "prefix_hits_total")
+    assert samples[0]["t_s"] == 0.0
+    assert all(samples[0][counter] in (0, None) for counter in counters)
+    for earlier, later in pairwise(samples):
+        assert earlier["t_s"] < later["t_s"]
+        for counter in counters:
+            assert earlier[counter] is None or earlier[counter] <= later[counter]
+    finishes_s = sorted(record["finish_s"] for record in records)
+    assert samples[-1]["t_s"] >= finishes_s[-1]
+    arrivals_s = [record["arrival_s"] for record in records]
+    if isinstance(spec.arrival, ClosedLoop):
+        later_arrivals_s = arrivals_s[spec.arrival.concurrency :]
+        earliest_finishes_s = finishes_s[: len(later_arrivals_s)]
+        for arrival_s, finish_s in zip(later_arrivals_s, earliest_finishes_s, strict=True):
+            assert arrival_s >= finish_s
+    else:
+        for arrival_s, request_spec in zip(arrivals_s, request_specs, strict=True):
+            assert arrival_s >= request_spec.arrival_s
+    summarize({"requests": records, "samples": samples})
