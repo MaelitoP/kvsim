@@ -232,7 +232,7 @@ An engine result has `source` set to the engine, `measured` set to `true`, the e
 
 ## Benchmark runs
 
-`benchmarks/run_matrix.sh <vllm|lmdeploy> [scenario ...]` measures one engine on a Linux host with one NVIDIA GPU, Docker and the NVIDIA container toolkit. Without scenarios it runs all five. So far `short_low` has been measured, three runs per engine on an NVIDIA L4, and every other cell has been started once on both engines without requests, which confirmed its flags and its cache size. The engine facts below were read from the sources of the pinned versions, vLLM v0.32.0 and LMDeploy v0.18.0, then checked against those launches, and the scripts check the ones a run depends on at every launch.
+`benchmarks/run_matrix.sh <vllm|lmdeploy> [scenario ...]` measures one engine on a Linux host with one NVIDIA GPU, Docker and the NVIDIA container toolkit. Without scenarios it runs all five. The whole matrix has been measured once, on one NVIDIA L4: 12 cells on vLLM and 9 on LMDeploy, three runs each, 63 result files under `results/`. The engine facts below were read from the sources of the pinned versions, vLLM v0.32.0 and LMDeploy v0.18.0, then checked against those launches, and the scripts check the ones a run depends on at every launch.
 
 ### Fixed settings
 
@@ -249,7 +249,7 @@ Both engines serve `Qwen/Qwen2.5-3B-Instruct` at one pinned revision in bfloat16
 | Chunked prefill | `--enable-chunked-prefill`, `--no-enable-chunked-prefill` | Always on |
 | Long-prefill threshold | `--long-prefill-token-threshold` | None |
 
-vLLM also runs with `--seed 0` and `--enable-per-request-metrics`, which gives the client the server-side times. LMDeploy runs with `--quant-policy 0`, so its cache is not quantized. Everything else is the engine's default. One default is not known to be the same on both: the model's `generation_config.json` sets a repetition penalty of 1.05, which vLLM reports applying to every request, and LMDeploy's log does not say whether it does. The client asks for a temperature of 0 and a fixed output length, so the penalty cannot change the lengths, only the work per sampled token.
+vLLM also runs with `--seed 0` and `--enable-per-request-metrics`, which gives the client the server-side times. LMDeploy runs with `--quant-policy 0`, so its cache is not quantized. Everything else is the engine's default. Both engines load the model's `generation_config.json` as sampling defaults, which sets a repetition penalty of 1.05, `top_k` 20 and `top_p` 0.8: vLLM warns about it at startup, and LMDeploy's `--generation-config` defaults to `auto`, the model's file. A request's own values take precedence on both, so the client's temperature of 0 keeps the output greedy; the penalty still applies to every sampled token, on both engines alike, and cannot change the fixed output lengths.
 
 ### Cells
 
@@ -291,7 +291,7 @@ Before the first request of a run, `run_matrix.sh` compares the count read from 
 
 ### One run
 
-For each scenario, cell and run, `run_matrix.sh` starts the engine in a new container, waits up to 15 minutes for `/health`, checks the cache size, runs the client, saves the engine log and removes the container. On the L4, vLLM answers `/health` after about 66 seconds and LMDeploy after about 11, once the image and the model are on the host. The engine's port is published on the loopback interface only, so nothing outside the host can add load or fill the prefix cache during a run. `HF_HOME` must be an absolute path: Docker would take a relative one for a named volume. The engine is restarted before every run because the three runs of a cell send the same prompts: on one engine instance, the second run would find the first one's blocks in the prefix cache. The client then warms each fresh instance with other prompts.
+For each scenario, cell and run, `run_matrix.sh` starts the engine in a new container, waits up to 15 minutes for `/health`, checks the cache size, runs the client, saves the engine log and removes the container. On the L4, vLLM answers `/health` after about 66 seconds and LMDeploy after about 11, once the image and the model are on the host. A run lasts from two and a half minutes to ten and a half, most of it the warm-up pass and the measured pass, and the whole matrix took 5 hours 46 minutes: 3 hours 31 for vLLM's 36 runs and 2 hours 15 for LMDeploy's 27. The engine's port is published on the loopback interface only, so nothing outside the host can add load or fill the prefix cache during a run. `HF_HOME` must be an absolute path: Docker would take a relative one for a named volume. The engine is restarted before every run because the three runs of a cell send the same prompts: on one engine instance, the second run would find the first one's blocks in the prefix cache. The client then warms each fresh instance with other prompts.
 
 A run writes `results/<engine>/<scenario>.<cell>.run<k>.json` and the engine log under the same name with `.log`. The result is written under a temporary name and renamed when the client succeeds, and a run whose result exists is skipped, so an interrupted matrix resumes where it stopped. When a run fails, because the engine exits during startup, holds another cache size or the client fails, the engine log is saved as `results/<engine>/failure.log` and the script stops; the next invocation removes that file.
 
@@ -395,6 +395,6 @@ vLLM builds its `SchedulerStats` at the end of `update_from_output`, once finish
 
 ## Planned features
 
-- **Benchmarks:** the rest of the matrix, of which only `short_low` is measured, then an analysis that tabulates the results and compares each measurement with a simulator replay.
+- **Benchmarks:** an analysis that tabulates the measured results and compares each measurement with a simulator replay.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.

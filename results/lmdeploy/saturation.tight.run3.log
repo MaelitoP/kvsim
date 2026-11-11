@@ -1,0 +1,732 @@
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 1416.20it/s]
+[TM][WARN][1111.22:38:04.390691][turbomind.cc:128] `max_context_token_num` is not set, default to 4096.
+Loading:   0%|          | 0/36 [00:00<?, ?it/s]Loading:   8%|▊         | 3/36 [00:00<00:01, 28.58it/s]Loading:  19%|█▉        | 7/36 [00:00<00:00, 33.56it/s]Loading:  31%|███       | 11/36 [00:00<00:00, 35.10it/s]Loading:  42%|████▏     | 15/36 [00:00<00:00, 35.48it/s]Loading:  53%|█████▎    | 19/36 [00:00<00:00, 36.42it/s]Loading:  64%|██████▍   | 23/36 [00:00<00:00, 26.66it/s]Loading:  75%|███████▌  | 27/36 [00:00<00:00, 29.07it/s]Loading:  86%|████████▌ | 31/36 [00:00<00:00, 31.09it/s]Loading:  97%|█████████▋| 35/36 [00:01<00:00, 32.42it/s]                                                        [TM][WARN][1111.22:38:06.059181][slab.h:136] slab_size 33554432, object_size 2359296, object_count 14, ratio 0.984375
+[TM][WARN][1111.22:38:06.059245][engine.cc:262] dp0 cache stats:
+[cache] region=592.00MiB live=0.00B (0.00%) live_alloc=0 | pages 0/18 used (0.00%) page_size=32.00MiB
+[cache]   free pages by order: o1=1 o4=1
+[cache]   slab obj=2.25MiB slab=32.00MiB cap=14 slabs=0(F0/P0/E0) obj 0/0 used (0.00%)
+HINT:    Please open [93m[1mhttp://0.0.0.0:8000[0m in a browser for detailed api usage!!!
+HINT:    Please open [93m[1mhttp://0.0.0.0:8000[0m in a browser for detailed api usage!!!
+HINT:    Please open [93m[1mhttp://0.0.0.0:8000[0m in a browser for detailed api usage!!!
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     172.17.0.1:37442 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41516 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41496 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41476 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41508 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41466 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41484 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41460 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41448 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41440 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41438 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41458 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41584 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41538 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41552 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41556 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41582 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41534 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41568 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41528 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41580 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41598 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41608 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41626 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41662 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41686 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41644 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41630 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41680 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41668 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41696 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41710 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41726 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41742 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41748 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41774 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41790 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41804 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41818 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41828 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41826 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41832 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:38:16 DP0] Avg thr (in/out): 1426.4 / 145.7 tokens/s, Server (succeeded/failed/routed/waiting): 0 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+[2026-11-11 22:38:26 DP0] Avg thr (in/out): 0.0 / 405.2 tokens/s, Server (succeeded/failed/routed/waiting): 0 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:41516 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41496 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41476 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41508 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41466 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41460 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41484 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41440 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41448 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41438 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41458 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41584 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:38:36 DP0] Avg thr (in/out): 1023.9 / 345.0 tokens/s, Server (succeeded/failed/routed/waiting): 12 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:41538 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41552 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41556 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41582 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41534 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41568 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41528 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41580 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41598 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41608 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41626 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:38:46 DP0] Avg thr (in/out): 1331.1 / 321.4 tokens/s, Server (succeeded/failed/routed/waiting): 23 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+INFO:     172.17.0.1:41654 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:38:56 DP0] Avg thr (in/out): 0.0 / 432.2 tokens/s, Server (succeeded/failed/routed/waiting): 24 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:41662 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41686 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41644 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41630 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41680 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41668 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41696 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41710 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41726 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:06 DP0] Avg thr (in/out): 1228.8 / 339.1 tokens/s, Server (succeeded/failed/routed/waiting): 35 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:41742 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41748 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:16 DP0] Avg thr (in/out): 0.0 / 388.5 tokens/s, Server (succeeded/failed/routed/waiting): 37 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:41758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41774 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41790 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41804 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41818 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41828 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41826 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41832 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:26 DP0] Avg thr (in/out): 1228.5 / 370.3 tokens/s, Server (succeeded/failed/routed/waiting): 47 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41516 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41476 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41496 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41466 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41508 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41460 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41484 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41440 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41448 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41438 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:36 DP0] Avg thr (in/out): 1126.2 / 319.3 tokens/s, Server (succeeded/failed/routed/waiting): 58 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+INFO:     172.17.0.1:41458 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41584 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:46 DP0] Avg thr (in/out): 0.0 / 421.6 tokens/s, Server (succeeded/failed/routed/waiting): 60 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:41538 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41552 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41556 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41582 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41568 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41534 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41580 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41528 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41608 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41598 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41626 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:39:56 DP0] Avg thr (in/out): 1331.1 / 340.1 tokens/s, Server (succeeded/failed/routed/waiting): 71 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:41654 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:06 DP0] Avg thr (in/out): 0.0 / 392.0 tokens/s, Server (succeeded/failed/routed/waiting): 72 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:41662 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41686 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41644 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41630 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41680 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41668 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41696 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41710 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41726 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:16 DP0] Avg thr (in/out): 1126.3 / 368.7 tokens/s, Server (succeeded/failed/routed/waiting): 83 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:41742 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41748 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41774 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41790 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41804 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41818 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41828 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41832 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41826 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:26 DP0] Avg thr (in/out): 1228.8 / 325.7 tokens/s, Server (succeeded/failed/routed/waiting): 94 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:36 DP0] Avg thr (in/out): 0.0 / 409.2 tokens/s, Server (succeeded/failed/routed/waiting): 95 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41516 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41476 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41466 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41496 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41460 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41508 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41440 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41484 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41448 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41438 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:46 DP0] Avg thr (in/out): 1228.6 / 353.7 tokens/s, Server (succeeded/failed/routed/waiting): 106 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:41458 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41584 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:40:56 DP0] Avg thr (in/out): 0.0 / 378.7 tokens/s, Server (succeeded/failed/routed/waiting): 108 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:41538 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41552 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41556 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41582 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41568 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41534 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41580 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41528 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41608 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41598 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41626 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:41:06 DP0] Avg thr (in/out): 1228.7 / 371.5 tokens/s, Server (succeeded/failed/routed/waiting): 119 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:41654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41662 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41686 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41644 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41630 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41680 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41668 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41696 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41710 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41720 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:41:16 DP0] Avg thr (in/out): 1126.2 / 331.9 tokens/s, Server (succeeded/failed/routed/waiting): 130 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+INFO:     172.17.0.1:41726 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:41:26 DP0] Avg thr (in/out): 102.4 / 410.2 tokens/s, Server (succeeded/failed/routed/waiting): 131 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:41742 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41748 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41774 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41804 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41790 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41818 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41828 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41832 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41826 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:41:36 DP0] Avg thr (in/out): 1126.4 / 351.3 tokens/s, Server (succeeded/failed/routed/waiting): 142 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:41:46 DP0] Avg thr (in/out): 0.0 / 369.1 tokens/s, Server (succeeded/failed/routed/waiting): 147 / 0 / 45 / 0, Engine (running/waiting): 11 / 34, KV cache: 95.8%, 
+[2026-11-11 22:41:56 DP0] Avg thr (in/out): 1331.1 / 376.0 tokens/s, Server (succeeded/failed/routed/waiting): 154 / 0 / 38 / 0, Engine (running/waiting): 11 / 27, KV cache: 95.8%, 
+[2026-11-11 22:42:06 DP0] Avg thr (in/out): 1126.2 / 332.2 tokens/s, Server (succeeded/failed/routed/waiting): 165 / 0 / 27 / 0, Engine (running/waiting): 13 / 14, KV cache: 95.8%, 
+[2026-11-11 22:42:16 DP0] Avg thr (in/out): 102.4 / 401.5 tokens/s, Server (succeeded/failed/routed/waiting): 167 / 0 / 25 / 0, Engine (running/waiting): 11 / 14, KV cache: 95.8%, 
+[2026-11-11 22:42:26 DP0] Avg thr (in/out): 1126.4 / 351.6 tokens/s, Server (succeeded/failed/routed/waiting): 178 / 0 / 14 / 0, Engine (running/waiting): 13 / 1, KV cache: 95.8%, 
+[2026-11-11 22:42:36 DP0] Avg thr (in/out): 102.4 / 362.5 tokens/s, Server (succeeded/failed/routed/waiting): 189 / 0 / 3 / 0, Engine (running/waiting): 3 / 0, KV cache: 93.1%, 
+[2026-11-11 22:42:46 DP0] Avg thr (in/out): 0.0 / 96.8 tokens/s, Server (succeeded/failed/routed/waiting): 190 / 0 / 2 / 0, Engine (running/waiting): 2 / 0, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40594 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40596 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40610 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40626 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40640 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40646 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40652 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40658 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40670 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40676 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40702 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40692 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40744 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40734 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40704 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40756 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40778 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40788 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40812 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40772 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40808 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40820 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40824 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40854 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40856 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40868 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40884 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40840 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40872 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40892 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40902 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40864 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40878 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40916 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40918 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40920 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40924 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40930 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40940 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40948 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40950 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:42:56 DP0] Avg thr (in/out): 1433.3 / 247.4 tokens/s, Server (succeeded/failed/routed/waiting): 192 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40594 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:43:06 DP0] Avg thr (in/out): 0.0 / 382.5 tokens/s, Server (succeeded/failed/routed/waiting): 195 / 0 / 48 / 0, Engine (running/waiting): 10 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:40606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40596 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40626 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40610 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40646 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40640 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40652 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40658 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:43:16 DP0] Avg thr (in/out): 1024.0 / 356.8 tokens/s, Server (succeeded/failed/routed/waiting): 204 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40670 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40676 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40692 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40702 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40744 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40704 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40734 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40756 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40778 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40788 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:43:26 DP0] Avg thr (in/out): 1331.1 / 336.4 tokens/s, Server (succeeded/failed/routed/waiting): 215 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40812 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:43:36 DP0] Avg thr (in/out): 0.0 / 411.2 tokens/s, Server (succeeded/failed/routed/waiting): 216 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40772 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40808 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40820 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40824 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40854 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40856 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40884 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40868 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40840 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:43:46 DP0] Avg thr (in/out): 1228.7 / 352.7 tokens/s, Server (succeeded/failed/routed/waiting): 227 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40872 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40892 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40902 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40864 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40916 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40878 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40918 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40920 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:43:56 DP0] Avg thr (in/out): 0.0 / 356.8 tokens/s, Server (succeeded/failed/routed/waiting): 235 / 0 / 48 / 0, Engine (running/waiting): 11 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40924 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40930 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40940 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40948 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40950 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:44:06 DP0] Avg thr (in/out): 1228.7 / 389.8 tokens/s, Server (succeeded/failed/routed/waiting): 240 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40594 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40596 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40626 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40610 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40646 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40640 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40652 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:44:16 DP0] Avg thr (in/out): 1126.2 / 335.5 tokens/s, Server (succeeded/failed/routed/waiting): 250 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40658 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:44:26 DP0] Avg thr (in/out): 0.0 / 402.8 tokens/s, Server (succeeded/failed/routed/waiting): 252 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40670 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40676 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40692 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40702 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40744 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40704 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40734 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40756 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40778 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40788 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:44:36 DP0] Avg thr (in/out): 1330.9 / 352.7 tokens/s, Server (succeeded/failed/routed/waiting): 263 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40812 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40772 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40808 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40820 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40824 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40854 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40856 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40884 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40868 - "POST /v1/completions HTTP/1.1" 200 OK
+[2026-11-11 22:44:46 DP0] Avg thr (in/out): 511.9 / 345.7 tokens/s, Server (succeeded/failed/routed/waiting): 274 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40840 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:44:56 DP0] Avg thr (in/out): 614.4 / 404.8 tokens/s, Server (succeeded/failed/routed/waiting): 275 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40872 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40892 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40902 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40864 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40916 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40878 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40918 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40920 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40924 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40930 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40940 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:06 DP0] Avg thr (in/out): 1228.7 / 340.3 tokens/s, Server (succeeded/failed/routed/waiting): 286 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40948 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40950 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:16 DP0] Avg thr (in/out): 0.0 / 392.3 tokens/s, Server (succeeded/failed/routed/waiting): 288 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41852 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40594 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40596 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40606 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40626 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40610 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40646 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40640 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40652 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:26 DP0] Avg thr (in/out): 1228.6 / 363.6 tokens/s, Server (succeeded/failed/routed/waiting): 298 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:40654 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40658 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40670 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40676 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40702 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40692 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40720 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40744 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40704 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40734 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40756 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:36 DP0] Avg thr (in/out): 1023.9 / 319.4 tokens/s, Server (succeeded/failed/routed/waiting): 309 / 0 / 48 / 0, Engine (running/waiting): 14 / 34, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40778 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40788 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:46 DP0] Avg thr (in/out): 204.8 / 427.1 tokens/s, Server (succeeded/failed/routed/waiting): 311 / 0 / 48 / 0, Engine (running/waiting): 11 / 37, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40812 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40772 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40758 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40792 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40808 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40820 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40824 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40854 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40856 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40884 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40868 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:45:56 DP0] Avg thr (in/out): 1228.7 / 338.3 tokens/s, Server (succeeded/failed/routed/waiting): 322 / 0 / 48 / 0, Engine (running/waiting): 13 / 35, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40840 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:06 DP0] Avg thr (in/out): 0.0 / 393.8 tokens/s, Server (succeeded/failed/routed/waiting): 323 / 0 / 48 / 0, Engine (running/waiting): 10 / 38, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40872 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40892 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40902 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40864 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40916 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40878 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40918 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40920 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40924 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40930 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40940 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:16 DP0] Avg thr (in/out): 1126.3 / 364.8 tokens/s, Server (succeeded/failed/routed/waiting): 334 / 0 / 48 / 0, Engine (running/waiting): 12 / 36, KV cache: 95.8%, 
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40948 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40962 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:40950 - "POST /v1/completions HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:26 DP0] Avg thr (in/out): 1228.7 / 318.2 tokens/s, Server (succeeded/failed/routed/waiting): 345 / 0 / 39 / 0, Engine (running/waiting): 14 / 25, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:36 DP0] Avg thr (in/out): 0.0 / 419.1 tokens/s, Server (succeeded/failed/routed/waiting): 347 / 0 / 37 / 0, Engine (running/waiting): 11 / 26, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:46 DP0] Avg thr (in/out): 1331.1 / 342.1 tokens/s, Server (succeeded/failed/routed/waiting): 358 / 0 / 26 / 0, Engine (running/waiting): 13 / 13, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:46:56 DP0] Avg thr (in/out): 0.0 / 393.7 tokens/s, Server (succeeded/failed/routed/waiting): 359 / 0 / 25 / 0, Engine (running/waiting): 10 / 15, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:47:06 DP0] Avg thr (in/out): 1126.3 / 360.2 tokens/s, Server (succeeded/failed/routed/waiting): 370 / 0 / 14 / 0, Engine (running/waiting): 12 / 2, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:47:16 DP0] Avg thr (in/out): 102.4 / 306.1 tokens/s, Server (succeeded/failed/routed/waiting): 381 / 0 / 3 / 0, Engine (running/waiting): 3 / 0, KV cache: 94.3%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+[2026-11-11 22:47:26 DP0] Avg thr (in/out): 0.0 / 87.9 tokens/s, Server (succeeded/failed/routed/waiting): 383 / 0 / 1 / 0, Engine (running/waiting): 1 / 0, KV cache: 95.8%, 
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     172.17.0.1:41834 - "GET /metrics HTTP/1.1" 200 OK
