@@ -2,7 +2,7 @@
 
 kvsim models request scheduling and paged KV-cache allocation for a full-attention inference engine. It does not run a model or store KV tensors. Given the same request arrivals and sampled tokens, it produces the same batches and block assignments. It has no runtime dependencies and does not read the wall clock.
 
-A load client under `benchmarks/` submits the same workloads to a real engine and writes its measurements in the simulator's result format. It is a script outside the package, with its own dependencies, and the only code here that reads a clock. Shell scripts beside it start vLLM and LMDeploy with comparable configurations and run the client over a matrix of scenarios.
+A load client under `benchmarks/` submits the same workloads to a real engine and writes its measurements in the simulator's result format. It is a script outside the package, with its own dependencies, and the only code here that reads a clock. Shell scripts beside it start vLLM and LMDeploy with comparable configurations and run the client over a matrix of scenarios, and an analysis script tabulates the measurements and compares them with simulator replays.
 
 ## Components and ownership
 
@@ -20,6 +20,7 @@ A load client under `benchmarks/` submits the same workloads to a real engine an
 | `benchmarks/client.py` | Measure a running engine under a workload: text prompts, streamed completions, metric scrapes | None |
 | `benchmarks/run_matrix.sh` | Run the benchmark matrix for one engine: start it, check its cache size, run the client, keep the log | The engine container |
 | `benchmarks/engines/vllm.sh`, `lmdeploy.sh` | Build one engine's launch command for a cell and read its cache size from its log | None |
+| `benchmarks/analyze.py` | Tabulate and plot the measured results, replay each cell in the simulator, fit a cost model per engine | None |
 
 `BlockPool`, `KVCacheManager` and `Scheduler` use explicit constructors. Queues, block storage and request tables are private. Callers use the existing counts and `usage` to inspect capacity. Tests inspect private state through the invariant helpers; there are no test-only public accessors.
 
@@ -130,7 +131,7 @@ Each turn of the loop is one step. The requests that have arrived are submitted 
 
 A sampled token depends only on the request's ID and the number of tokens the request has generated, through CRC-32. A request's output is therefore the same whatever the schedule, after a preemption and in every process; Python's `hash` of a string changes from one process to the next. The token is never the EOS token. A request ends at its output limit, the `output_len` of its spec, which is what the load client asks of an engine with `ignore_eos` and `max_tokens`.
 
-`CostModel(step_overhead_s, prefill_s_per_token, decode_s_per_seq)` estimates a step as `step_overhead_s + prefill_s_per_token * num_prefill_tokens + decode_s_per_seq * num_decode_seqs`. A request scheduled for exactly one token counts as a decode sequence; a request scheduled for more adds its tokens to the prefill tokens. The split follows what the step computes, not the request's history: the one-token tail of a chunked prompt, or a prompt whose cache hit leaves one token, costs one position like a decode. The step overhead must be positive, so every step takes time and sample times strictly increase. The other two coefficients must be at least zero, and all three finite. `step_duration` takes the token counts of a batch and makes the split itself. The defaults, 20 ms per step, 0.2 ms per prefill token and 0.5 ms per decode sequence, are placeholders, not measurements. Until coefficients are fitted to an engine, the seconds of a result only compare runs made with the same cost model; its step numbers and scheduler counters do not depend on the cost model at all.
+`CostModel(step_overhead_s, prefill_s_per_token, decode_s_per_seq)` estimates a step as `step_overhead_s + prefill_s_per_token * num_prefill_tokens + decode_s_per_seq * num_decode_seqs`. A request scheduled for exactly one token counts as a decode sequence; a request scheduled for more adds its tokens to the prefill tokens. The split follows what the step computes, not the request's history: the one-token tail of a chunked prompt, or a prompt whose cache hit leaves one token, costs one position like a decode. The step overhead must be positive, so every step takes time and sample times strictly increase. The other two coefficients must be at least zero, and all three finite. `step_duration` takes the token counts of a batch and makes the split itself. The defaults, 20 ms per step, 0.2 ms per prefill token and 0.5 ms per decode sequence, are placeholders, not measurements: the package holds no constant of one GPU and one model. The seconds of a result only compare runs made with the same cost model; its step numbers and scheduler counters do not depend on the cost model at all. Coefficients fitted to the two measured engines are in `results/tables.md`; see Analysis.
 
 ### Result
 
@@ -299,6 +300,54 @@ A run writes `results/<engine>/<scenario>.<cell>.run<k>.json` and the engine log
 
 The launch command stored in `config.command` is the `docker run` command that started the container. `results/<engine>/README.txt` is written at each invocation with the GPU, driver and CUDA versions the host reports, the image, the model revision and the date. The client builds its prompts with the `tokenizer.json` of the pinned model revision, downloaded once to `kvsim` under `$XDG_CACHE_HOME`, `~/.cache` by default, and scrapes the metrics every second; neither is stored in a result.
 
+## Analysis
+
+`benchmarks/analyze.py` turns the measured results into `results/tables.md` and three plots under `results/plots/`. It needs `matplotlib` from the `bench` group, whose NumPy does the least squares. `python benchmarks/analyze.py` writes them. With `--check` it writes nothing and fails when `tables.md` is not what the results give; a test runs that check, so the committed tables cannot drift from the committed results, and no number in them is typed.
+
+A cell is one scenario, configuration and engine. Its measured value is the median, over its runs, of the statistic `summarize` computes for each run. A dash stands for a value that is not published, not defined, such as a hit rate when nothing was looked up, or missing from one of the runs; such a value is never printed as zero. `load_cells` refuses a file whose name is outside the matrix, whose `source` is not its directory, or whose workload or configuration differs from the other runs of its cell, and the command reports that, like a fit that fails, as an error naming the file or the engine.
+
+### Replays
+
+Each cell's workload is replayed in the simulator, in memory. No replay is stored: it is a deterministic function of committed inputs and takes a fraction of a second. `replay_config` is the only place that maps an engine's result to a `SchedulerConfig`:
+
+| Result | Replay |
+| --- | --- |
+| `num_blocks`, `block_size`, `max_num_seqs`, the two switches, the long-prefill threshold | Copied |
+| `max_num_batched_tokens`, vLLM | Copied: one budget for prefill and decode |
+| `max_num_batched_tokens`, LMDeploy | Plus `max_num_seqs`: TurboMind's limit bounds prefill only, and a pass also takes one token per running request |
+| Admission, vLLM | Full-input admission, unless the launch command holds `--no-scheduler-reserve-full-isl` |
+| Admission, LMDeploy | The simulator's default. LMDeploy publishes no preemption counter, so its rule is not observable, and both settings give the same estimated times within a percent |
+
+A replay takes the spec's token IDs, while the engines received text that tokenizes to almost the same lengths. On `shared_prefix` this shows as a simulated hit rate of 0.816 against 0.815 measured. Async scheduling, on by default in both engines, is not modelled.
+
+### Tables
+
+A comparison table only holds columns that mean the same thing in every row.
+
+| Table | Content |
+| --- | --- |
+| Engines, measured | TTFT and TPOT at the median and the 95th percentile, output tokens per second, prefix hit rate, and the spread of the TTFT median over the runs, for both engines |
+| vLLM against kvsim | Preemptions, maximum KV usage and prefix hit rate, measured and simulated, and the measured gap between the client's TTFT and vLLM's own queue time plus time to first token |
+| Estimated against measured times | TTFT, TPOT and throughput of each cell, measured and estimated with the engine's fitted cost model, with the error and whether the cell was used for the fit |
+| LMDeploy cache usage | On its own: its gauge counts live cache objects, blocks kept by the prefix cache included |
+| Cost model, fitted | The three coefficients per engine, the R² on the TTFT intervals and on the decode intervals, and the scenarios fitted on |
+
+### Cost-model fit
+
+A simulated time is linear in the three coefficients: the time between two events of a request is the step overhead times the steps in between, plus the prefill cost times the prefill tokens of those steps, plus the decode cost times their decode sequences. In a closed loop the schedule does not depend on the cost model, so three replays with the unit cost models `(1, 0, 0)`, `(1, 1, 0)` and `(1, 0, 1)` give those three counts for any interval, through `simulate()` alone. `fit_cost_model` takes two intervals per request, arrival to first token and first token to finish, and solves the least squares against the measured durations. It refuses a Poisson workload, whose arrivals move with the clock, a result that does not hold its replay's requests in order, results that do not separate the three coefficients, and a solution that is not a valid cost model, which a single scenario can give.
+
+The fit uses the `baseline` cell of every scenario, all runs. Those cells span batch sizes 4, 16, 32 and 48; `short_low` alone always runs four requests and cannot separate the step overhead from the cost of a decode sequence. The other cells were not used and show how the fit carries over. On the L4 the coefficients are 23.97 ms per step, 0.1116 ms per prefill token and 0.277 ms per decode sequence for vLLM, and 24.88, 0.1045 and 0.222 for LMDeploy. The decode intervals are long and dominate the fit: its R² is 0.999 on them, and only 0.62 for vLLM and 0.66 for LMDeploy on the TTFT intervals. The coefficients are written in the tables with the scenarios they were fitted on and passed explicitly to every replay; `CostModel`'s defaults do not change.
+
+### What the replays reproduce
+
+Scheduler counters, which do not depend on the cost model: vLLM preempts 6, 80, 80 and 80 times on its four tight cells, the replay 7, 75, 76 and 79 times; the maximum KV usage of the large-cache cells agrees within 0.002, except with the long-prefill threshold, 0.149 simulated against 0.135; the hit rates agree within 0.001.
+
+Estimated times, with the fitted cost models: TPOT lands within 8.1% of the measurement and throughput within 8.3% on every cell; TTFT under the tight cache within 7.4%. With the large cache the estimated TTFT is 37.6 to 66.4% below the measurement on every cell but `short_low`, where it is within 5.6%. Part of what the simulator lacks there is outside the scheduler: on vLLM the client's TTFT exceeds the engine's own queue time plus time to first token by 18 to 263 ms at the median.
+
+### Plots
+
+`ttft.png` and `throughput.png` show the measured median TTFT and the measured throughput of every cell, one panel per scenario with its own scale, vLLM and LMDeploy side by side. `kv_usage_saturation.png` shows, for `saturation` under both cache sizes, the KV usage vLLM reported over time in its first run and the simulator's usage over its estimated time. The plots are not compared by the check.
+
 ## Invariants and where they are checked
 
 The helpers live in `tests/invariants.py`, except the machines. `tests/strategies.py` holds the hypothesis strategies for workload specs and scheduler configurations that several test modules share. `check_scheduler` calls `check_manager`, which calls `check_pool`. `run_checked_step` drives one step and calls `check_scheduler` after its `schedule()`, `finish_requests` and `complete_step`; the scheduler tests run their steps through it, and some also call the scheduler directly to test rejected calls. The machines call their checker after every rule.
@@ -336,6 +385,7 @@ The helpers live in `tests/invariants.py`, except the machines. `tests/strategie
 | A measurement follows its spec: one record per request in spec order with the requested output length and `arrival_s <= first_token_s <= finish_s`. Samples start at 0.0 with zeroed counters, at strictly increasing times, the last one no earlier than the last finish; a counter that has a reading keeps one and never decreases. In a closed loop, each request after the first `concurrency` arrives no earlier than a finish; a Poisson request is sent no earlier than its arrival. Every measurement can be summarized. | `check_measurement` |
 | A closed loop opens exactly `concurrency` requests at once while that many remain, and Poisson arrivals are not limited: a fake engine holds each stream until the expected number of requests are open. A Poisson request is sent at its arrival time on a fake clock. The warm-up sends the next seed's prompts before the measured ones and is not recorded. Counters count the measured pass only, and one that appears late counts from zero. A sample reads each engine's metrics under the names pinned in a literal exposition. A missing metric is `null`. A failed, truncated or shortened request fails the run, in the warm-up or in the measured pass. The file the client's command line writes is summarized by `kvsim summarize` as measured. | `tests/test_client.py` |
 | An engine's block count is read from its startup log: vLLM's token count less the null block, TurboMind's page count times the blocks a page holds, and a log without the expected report is rejected. Each engine's baseline launch command is pinned whole, and a cell's command is the baseline's with that cell's arguments replaced. On a fake host, where `docker`, `curl`, `nvidia-smi` and `uv` are stand-ins, a scenario starts the engine once per run, calls the client with exactly the workload, launch command, block count read from the log and configuration of its cell, keeps the log, and skips existing results when run again. The whole matrix runs each engine's supported cells three times. An engine that exits during startup or holds another cache size is stopped before the first request, a failed client leaves no result, and both leave the engine log. | `tests/test_engines.py` |
+| A replay takes its engine's configuration: the recorded limits and switches, LMDeploy's budget plus one token per sequence, full-input admission for vLLM unless its launch command turned it off. The fit recovers the cost model that produced a result's times, reports the fit of the TTFT intervals apart from the decode intervals, and refuses a Poisson workload, results that do not separate the coefficients, a solution that is no cost model and a result missing a request. Tables list cells in matrix order with the median over the runs, show a dash for a value that is undefined or missing from one run and for the spread of a single run, take the simulated counters from a replay, and estimate with zero error the cells whose times came from the fitted model. The command writes the tables and the plots, its check fails on a missing or edited table, and it refuses a file outside its cell, runs that differ and an empty directory. The committed tables are what the committed results give. | `tests/test_analyze.py` |
 | The same spec, configuration and cost model give the same result in one process, and byte-identical files from two processes with different string hash seeds. No result holds token IDs, so the files guard orderings; pinned values guard the sampled token itself, a fixed function of the request ID and the output position that is never EOS. | `tests/test_simulator.py` |
 
 Two hypothesis machines drive these helpers. `BlockPoolMachine` in `tests/test_block_pool.py` mixes allocate, release, retain, cache and reset on one pool and checks each rule's effect on allocation order, eviction and the map against the state before the rule. `SchedulerMachine` in `tests/test_stateful.py` draws a configuration, then mixes arrivals of one to three requests, steps that may abort a request while the batch is pending, and aborts of live, finished and unknown IDs. The configuration covers prefix caching on and off, full-input admission on and off, chunked prefill on and off with or without a long-prefill threshold, block sizes 2 and 4, and pools between one request's maximum and two blocks more, so preemption is frequent. Prompts take a block-aligned slice of one of two shared prefixes, so caching examples hit. Example tests cover the cases a machine reaches too rarely to rely on: allocation order, admission, chunking, preemption order, resumption, prefix sharing, the lookup cap and its first-miss stop, hits at the head of the free queue, aborts in every state and a same-ID re-add during a pending batch.
@@ -400,6 +450,6 @@ vLLM builds its `SchedulerStats` at the end of `update_from_output`, once finish
 
 ## Planned features
 
-- **Benchmarks:** an analysis that tabulates the measured results and compares each measurement with a simulator replay.
+- **Findings:** a written account of what the measurements and the replays show, with every claim tied to a result file.
 
 Sliding windows, hybrid allocators, multimodal inputs, LoRA, speculative decoding and async scheduling remain outside the simulator's scope.
