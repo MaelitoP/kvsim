@@ -368,8 +368,7 @@ def test_a_resumed_request_hits_its_own_blocks_unless_they_were_evicted(
     assert batches[1].preempted == ("young",)
     assert batches[-1].scheduled_resumed == ("young",)
     assert batches[-1].num_scheduled_tokens == {"young": 7 - num_hit_tokens}
-    assert scheduler.prefix_cache_queries == 4 + 6 + 7
-    assert scheduler.prefix_cache_hits == num_hit_tokens
+    assert (scheduler.prefix_cache_queries, scheduler.prefix_cache_hits) == (4 + 6, 0)
 
 
 def test_a_block_completed_by_decoding_is_cached() -> None:

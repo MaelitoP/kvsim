@@ -277,8 +277,10 @@ def check_result(result: Result) -> None:
             record["arrival_s"] <= sample["t_s"] < record["finish_s"] for record in records
         )
         assert sample["running"] + sample["waiting"] == num_in_flight
-    if not config["enable_prefix_caching"]:
-        assert samples[-1]["prefix_queries_total"] == 0
+    num_queried_tokens = sum(record["prompt_tokens"] for record in records)
+    assert samples[-1]["prefix_queries_total"] == (
+        num_queried_tokens if config["enable_prefix_caching"] else 0
+    )
     step_ends_s: dict[int, float] = {}
     for record, request_spec in zip(records, request_specs, strict=True):
         assert record["request_id"] == request_spec.request_id

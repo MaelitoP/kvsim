@@ -158,6 +158,12 @@ class SchedulerMachine(RuleBasedStateMachine):
             self.record_step([])
         assert not self.scheduler.has_unfinished_requests
         assert self.scheduler.kv_cache_manager.usage == 0.0
+        if self.config.enable_prefix_caching:
+            assert self.scheduler.prefix_cache_queries == sum(
+                request.num_prompt_tokens
+                for request in self.requests
+                if request.first_scheduled_step is not None
+            )
         for request in self.requests:
             expected = expected_output(
                 request.max_output_tokens, self.eos_position[request.request_id]

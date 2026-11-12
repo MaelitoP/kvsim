@@ -162,11 +162,11 @@ class Scheduler:
             else:
                 request.first_scheduled_step = step
                 scheduled_new.append(request.request_id)
+                if self.config.enable_prefix_caching:
+                    self.prefix_cache_queries += request.num_prompt_tokens
+                    self.prefix_cache_hits += num_computed_tokens
             request.status = RequestStatus.RUNNING
             request.num_computed_tokens = num_computed_tokens
-            if self.config.enable_prefix_caching:
-                self.prefix_cache_queries += request.num_tokens
-                self.prefix_cache_hits += num_computed_tokens
             num_scheduled_tokens[request.request_id] = num_new_tokens
             token_budget -= num_new_tokens
 
