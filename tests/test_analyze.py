@@ -7,13 +7,16 @@ from typing import cast
 import pytest
 
 from analyze import (
-    client_overhead_ms,
+    Pressure,
+    TtftSplit,
     fit_cost_model,
     fit_engines,
     load_cells,
     main,
     render_tables,
     replay_config,
+    simulate_pressure,
+    ttft_split_ms,
 )
 from client import Engine
 from kvsim.scheduler import SchedulerConfig
@@ -54,12 +57,13 @@ def measurement(
     engine: Engine,
     spec: WorkloadSpec,
     *,
+    num_blocks: int = 64,
     enable_prefix_caching: bool = True,
     cost_model: CostModel = COST_MODEL,
 ) -> Result:
     """An engine-shaped result whose times a simulation with `cost_model` produced."""
     config = SchedulerConfig(
-        num_blocks=64,
+        num_blocks=num_blocks,
         block_size=8,
         max_running_requests=MAX_NUM_SEQS,
         max_tokens_per_step=MAX_NUM_BATCHED_TOKENS + (MAX_NUM_SEQS if engine == "lmdeploy" else 0),
@@ -199,17 +203,137 @@ def test_the_fit_refuses_results_that_determine_no_cost_model(result: Result, me
         fit_cost_model([result])
 
 
-def test_the_client_overhead_is_the_ttft_the_engine_does_not_account_for() -> None:
-    result = measurement("vllm", SPECS["short_low"])
-    assert client_overhead_ms(result) is None
+def test_the_ttft_split_sets_the_engine_times_apart_from_the_rest_of_the_client_ttft() -> None:
+    requests = measurement("vllm", SPECS["short_low"])["requests"]
+    assert ttft_split_ms(requests) is None
 
-    for request, unaccounted_ms in zip(result["requests"], range(12), strict=True):
+    for request, outside_ms in zip(requests, range(12), strict=True):
         ttft_ms = (request["first_token_s"] - request["arrival_s"]) * 1000
         request["server_queue_ms"] = 5.0
-        request["server_ttft_ms"] = ttft_ms - 5.0 - unaccounted_ms
-    result["requests"][0]["server_queue_ms"] = None
+        request["server_ttft_ms"] = ttft_ms - 5.0 - outside_ms
+    requests[0]["server_queue_ms"] = None
+    engine_ms = sorted(cast(float, request["server_ttft_ms"]) for request in requests[1:])
 
-    assert client_overhead_ms(result) == pytest.approx(6.0)
+    assert ttft_split_ms(requests) == pytest.approx(TtftSplit(5.0, engine_ms[5], 2.0, 6.0, 10.0))
+    assert ttft_split_ms(requests[:2]) is None
+
+
+TWO_REQUESTS = WorkloadSpec(
+    name="two",
+    seed=0,
+    vocab_size=1000,
+    num_requests=2,
+    prompt_len=((8, 8),),
+    output_len=(5, 5),
+    shared_prefix_len=0,
+    num_prefix_groups=1,
+    arrival=ClosedLoop(concurrency=2),
+)
+SHARED_FIRST_BLOCK = replace(TWO_REQUESTS, shared_prefix_len=4, prompt_len=((4, 4),))
+
+
+def pressure(
+    scheduled_tokens: int, discarded_tokens: int, recovered_tokens: int, preemptions: int = 1
+) -> Pressure:
+    return Pressure(
+        preemptions=preemptions,
+        scheduled_tokens=scheduled_tokens,
+        discarded_tokens=discarded_tokens,
+        recovered_tokens=recovered_tokens,
+        max_orphaned_blocks=0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("spec", "config", "expected"),
+    [
+        (
+            TWO_REQUESTS,
+            SchedulerConfig(num_blocks=5, block_size=4),
+            pressure(scheduled_tokens=24, discarded_tokens=8, recovered_tokens=8),
+        ),
+        (
+            TWO_REQUESTS,
+            SchedulerConfig(num_blocks=5, block_size=4, enable_prefix_caching=False),
+            pressure(scheduled_tokens=32, discarded_tokens=8, recovered_tokens=0),
+        ),
+        (
+            SHARED_FIRST_BLOCK,
+            SchedulerConfig(num_blocks=4, block_size=4),
+            pressure(scheduled_tokens=20, discarded_tokens=8, recovered_tokens=8),
+        ),
+    ],
+    ids=["resumed-from-the-cache", "resumed-without-a-cache", "victim-admitted-with-a-hit"],
+)
+def test_pressure_counts_the_tokens_a_victim_held_and_those_it_finds_cached_on_resumption(
+    spec: WorkloadSpec, config: SchedulerConfig, expected: Pressure
+) -> None:
+    assert simulate_pressure(spec, config) == expected
+
+
+@pytest.mark.parametrize(
+    ("spec", "config"),
+    [
+        (SPECS["saturation"], SchedulerConfig(13, block_size=8, max_tokens_per_step=64)),
+        (SPECS["saturation"], SchedulerConfig(16, block_size=8, max_tokens_per_step=64)),
+        (
+            replace(
+                TWO_REQUESTS,
+                seed=992,
+                vocab_size=3,
+                num_requests=7,
+                prompt_len=((2, 8),),
+                output_len=(1, 3),
+            ),
+            SchedulerConfig(
+                4, block_size=4, max_tokens_per_step=8, enable_full_input_admission=True
+            ),
+        ),
+    ],
+    ids=["one-request-fits", "two-requests-fit", "outputs-within-the-prompt-vocabulary"],
+)
+def test_pressure_is_counted_on_the_schedule_the_simulator_replays(
+    spec: WorkloadSpec, config: SchedulerConfig
+) -> None:
+    steps = simulate(spec, config, CostModel(1, 0, 0))
+    steps_and_tokens = simulate(spec, config, CostModel(1, 1, 1))
+
+    counted = simulate_pressure(spec, config)
+
+    assert counted.preemptions == steps["samples"][-1]["preemptions_total"] > 0
+    assert counted.scheduled_tokens == max(
+        request["finish_s"] for request in steps_and_tokens["requests"]
+    ) - max(request["finish_s"] for request in steps["requests"])
+
+
+SAME_PROMPTS = replace(TWO_REQUESTS, vocab_size=1, num_requests=4, prompt_len=((4, 4),))
+SHARED_TWO_BLOCKS = replace(TWO_REQUESTS, shared_prefix_len=8, prompt_len=((2, 2),))
+
+
+@pytest.mark.parametrize(
+    ("spec", "config", "num_orphaned_blocks"),
+    [
+        (SAME_PROMPTS, SchedulerConfig(5, block_size=4), 3),
+        (replace(SAME_PROMPTS, vocab_size=1000), SchedulerConfig(5, block_size=4), 0),
+        (SHARED_TWO_BLOCKS, SchedulerConfig(4, block_size=4, long_prefill_token_threshold=4), 1),
+        (SHARED_TWO_BLOCKS, SchedulerConfig(4, block_size=4), 0),
+    ],
+    ids=[
+        "same-block-aligned-prompts",
+        "distinct-prompts",
+        "shared-prefix-computed-in-parallel",
+        "shared-prefix-computed-once",
+    ],
+)
+def test_pressure_counts_the_cached_blocks_chained_to_a_duplicate_of_an_evicted_block(
+    spec: WorkloadSpec, config: SchedulerConfig, num_orphaned_blocks: int
+) -> None:
+    assert simulate_pressure(spec, config).max_orphaned_blocks == num_orphaned_blocks
+
+
+def test_pressure_is_simulated_on_closed_loops_only() -> None:
+    with pytest.raises(ValueError, match="closed-loop"):
+        simulate_pressure(replace(TWO_REQUESTS, arrival=Poisson(rate=5.0)), SchedulerConfig(8))
 
 
 @pytest.fixture
@@ -224,10 +348,10 @@ def results_dir(tmp_path: Path) -> Path:
             if (engine, scenario) == ("vllm", "short_low"):
                 for run in runs:
                     run["samples"][-1]["preemptions_total"] = 3
-                for request in runs[0]["requests"]:
-                    ttft_ms = (request["first_token_s"] - request["arrival_s"]) * 1000
-                    request["server_queue_ms"] = 1.0
-                    request["server_ttft_ms"] = ttft_ms - 4.0
+                    for outside_ms, request in enumerate(run["requests"]):
+                        ttft_ms = (request["first_token_s"] - request["arrival_s"]) * 1000
+                        request["server_queue_ms"] = 1.0
+                        request["server_ttft_ms"] = ttft_ms - 1.0 - outside_ms
             write_runs(tmp_path, f"{scenario}.baseline", runs)
     write_runs(
         tmp_path,
@@ -271,9 +395,9 @@ def test_tables_set_vllm_against_its_replay_and_estimates_against_measurements(
     tables = tables_of(results_dir)
 
     assert table_rows(tables, "vLLM against kvsim, scheduler counters") == [
-        ["short_low", "baseline", "3", "0", "0.172", "0.172", "0.000", "0.000", "3.0"],
-        ["short_low", "no_prefix_caching", "0", "0", "0.172", "0.172", "-", "-", "-"],
-        ["saturation", "baseline", "0", "0", "0.812", "0.812", "-", "0.000", "-"],
+        ["short_low", "baseline", "3", "0", "0.172", "0.172", "0.000", "0.000"],
+        ["short_low", "no_prefix_caching", "0", "0", "0.172", "0.172", "-", "-"],
+        ["saturation", "baseline", "0", "0", "0.812", "0.812", "-", "0.000"],
     ]
     estimates = table_rows(tables, "Estimated against measured times")
     assert [row[2:4] for row in estimates] == [
@@ -299,6 +423,58 @@ def test_tables_set_vllm_against_its_replay_and_estimates_against_measurements(
         ["vllm", "20.00", "0.2000", "0.500", "1.00", "1.0000", "short_low, saturation"],
         ["lmdeploy", "20.00", "0.2000", "0.500", "1.00", "1.0000", "short_low, saturation"],
     ]
+
+
+def test_tables_split_the_ttft_by_arrival_and_replay_the_other_budget_and_admission_rules(
+    results_dir: Path,
+) -> None:
+    tight = measurement("vllm", SPECS["saturation"], num_blocks=16)
+    write_runs(results_dir, "saturation.tight", [tight])
+    tables = tables_of(results_dir)
+
+    arrivals = table_rows(tables, "Time to first token by arrival")
+    assert arrivals[0][3:] == ["29.0", "29.0", "24.3", "24.3", "1.0", "15.4", "2.9", "6.5", "10.1"]
+    assert arrivals[1][3:] == ["29.0", "29.0", "27.6", "27.6", "-", "-", "-", "-", "-"]
+    assert arrivals[2][3:7] == ["49.0", "29.0", "44.3", "24.3"]
+    assert table_rows(tables, "Token budget rule, estimated") == [
+        ["short_low", "24.5", "27.9", "24.5", "27.9"],
+        ["saturation", "67.4", "64.2", "67.4", "64.2"],
+    ]
+    pressure_rows = table_rows(tables, "Memory pressure, simulated")
+    assert [row[:4] for row in pressure_rows] == [
+        ["saturation", "16", "on", "whole input"],
+        ["saturation", "16", "on", "first chunk"],
+    ]
+    assert pressure_rows[0][4:] == ["0", "955", "0", "0", "0", "0.000", "967.7", "43.1"]
+    assert pressure_rows[1][4:] == ["8", "1002", "255", "208", "0", "0.000", "929.8", "44.2"]
+
+
+def test_tables_split_the_ttft_by_prompt_range_and_sweep_the_cache_of_shared_prefixes(
+    results_dir: Path,
+) -> None:
+    two_ranges = replace(SPECS["short_low"], prompt_len=((8, 8), (56, 56)), arrival=ClosedLoop(1))
+    shared_prefix = replace(SPECS["short_low"], shared_prefix_len=16, num_prefix_groups=2)
+    write_runs(results_dir, "mixed.baseline", [measurement("vllm", two_ranges)])
+    write_runs(results_dir, "shared_prefix.baseline", [measurement("vllm", shared_prefix)])
+    tables = tables_of(results_dir)
+
+    assert table_rows(tables, "Time to first token by prompt length") == [
+        ["mixed", "baseline", "vllm", "8 to 8", "21.6", "21.6"],
+        ["mixed", "baseline", "vllm", "56 to 56", "31.2", "31.2"],
+    ]
+    assert [row[:4] for row in table_rows(tables, "Memory pressure, simulated")] == [
+        ["shared_prefix", str(num_blocks), "on", "whole input"]
+        for num_blocks in (252, 192, 160, 144, 128)
+    ]
+
+
+def test_tables_replay_no_other_setting_of_an_engine_without_a_fit(tmp_path: Path) -> None:
+    tight = measurement("vllm", SPECS["saturation"], num_blocks=16)
+    write_runs(tmp_path, "saturation.tight", [tight])
+    tables = tables_of(tmp_path)
+
+    assert table_rows(tables, "Token budget rule, estimated") == []
+    assert table_rows(tables, "Memory pressure, simulated") == []
 
 
 def test_the_command_writes_tables_and_plots_and_checks_them(

@@ -32,22 +32,22 @@ Spread is the range of the TTFT median over the runs, relative to its median.
 
 ## vLLM against kvsim, scheduler counters
 
-The simulated counters do not depend on the cost model. vLLM's usage is read from a gauge once per second, between steps; the simulator's is the highest usage a step runs with. The last column is measured: the median, over the requests of the first run, of the client's TTFT minus vLLM's own queue time and time to first token.
+The simulated counters do not depend on the cost model. vLLM's usage is read from a gauge once per second, between steps; the simulator's is the highest usage a step runs with.
 
-| Scenario | Cell | Preemptions, measured | Preemptions, simulated | Max KV usage, measured | Max KV usage, simulated | Hit rate, measured | Hit rate, simulated | Client TTFT above server TTFT, ms |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| short_low | baseline | 0 | 0 | 0.011 | 0.011 | 0.000 | 0.000 | 18.3 |
-| long_high | baseline | 0 | 0 | 0.479 | 0.481 | 0.000 | 0.000 | 259.6 |
-| long_high | tight | 6 | 7 | 1.000 | 1.000 | 0.000 | 0.000 | 207.7 |
-| shared_prefix | baseline | 0 | 0 | 0.105 | 0.107 | 0.815 | 0.816 | 59.7 |
-| shared_prefix | no_prefix_caching | 0 | 0 | 0.168 | 0.169 | - | - | 157.2 |
-| mixed | baseline | 0 | 0 | 0.137 | 0.139 | 0.000 | 0.000 | 202.4 |
-| mixed | no_chunked_prefill | 0 | 0 | 0.139 | 0.139 | 0.000 | 0.000 | 200.1 |
-| mixed | long_prefill_512 | 0 | 0 | 0.135 | 0.149 | 0.000 | 0.000 | 124.0 |
-| saturation | baseline | 0 | 0 | 0.564 | 0.564 | 0.000 | 0.000 | 262.6 |
-| saturation | tight | 80 | 75 | 1.000 | 1.000 | 0.000 | 0.000 | 228.6 |
-| saturation | tight_no_prefix_caching | 80 | 76 | 1.000 | 1.000 | - | - | 230.4 |
-| saturation | tight_sim_aligned | 80 | 79 | 1.000 | 1.000 | 0.000 | 0.000 | 234.6 |
+| Scenario | Cell | Preemptions, measured | Preemptions, simulated | Max KV usage, measured | Max KV usage, simulated | Hit rate, measured | Hit rate, simulated |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| short_low | baseline | 0 | 0 | 0.011 | 0.011 | 0.000 | 0.000 |
+| long_high | baseline | 0 | 0 | 0.479 | 0.481 | 0.000 | 0.000 |
+| long_high | tight | 6 | 7 | 1.000 | 1.000 | 0.000 | 0.000 |
+| shared_prefix | baseline | 0 | 0 | 0.105 | 0.107 | 0.815 | 0.816 |
+| shared_prefix | no_prefix_caching | 0 | 0 | 0.168 | 0.169 | - | - |
+| mixed | baseline | 0 | 0 | 0.137 | 0.139 | 0.000 | 0.000 |
+| mixed | no_chunked_prefill | 0 | 0 | 0.139 | 0.139 | 0.000 | 0.000 |
+| mixed | long_prefill_512 | 0 | 0 | 0.135 | 0.149 | 0.000 | 0.000 |
+| saturation | baseline | 0 | 0 | 0.564 | 0.564 | 0.000 | 0.000 |
+| saturation | tight | 80 | 75 | 1.000 | 1.000 | 0.000 | 0.000 |
+| saturation | tight_no_prefix_caching | 80 | 76 | 1.000 | 1.000 | - | - |
+| saturation | tight_sim_aligned | 80 | 79 | 1.000 | 1.000 | 0.000 | 0.000 |
 
 ## Estimated against measured times
 
@@ -76,6 +76,79 @@ Estimates use the cost model fitted for the engine, below. An error is the estim
 | saturation | tight_no_prefix_caching | vllm | no | 50450.3 | 48456.6 | -4.0% | 31.2 | 30.2 | -3.2% | 352.0 | 366.3 | +4.1% |
 | saturation | tight_no_prefix_caching | lmdeploy | no | 50112.7 | 48586.4 | -3.0% | 30.9 | 30.4 | -1.8% | 353.9 | 364.7 | +3.1% |
 | saturation | tight_sim_aligned | vllm | no | 51473.5 | 47676.9 | -7.4% | 32.4 | 29.8 | -7.8% | 343.0 | 371.3 | +8.3% |
+
+## Time to first token by arrival
+
+The first requests of a closed loop, as many as its concurrency, arrive together and queue behind each other; each later request arrives when one finishes. The TTFT columns are medians over the requests of each kind, measured or estimated. The last five columns are measured on the later requests of vLLM, which reports for each request its time in the queue and its time from scheduling to the first token: their medians, then the 10th, 50th and 90th percentiles of the rest of the client's TTFT, which passes before the scheduler has the request or after the token is sampled.
+
+| Scenario | Cell | Engine | First requests, TTFT p50 ms, measured | First requests, estimated | Later requests, TTFT p50 ms, measured | Later requests, estimated | Queue p50 ms | Scheduling to first token p50 ms | Outside the scheduler p10 ms | Outside p50 ms | Outside p90 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| short_low | baseline | vllm | 115.3 | 108.8 | 109.8 | 111.1 | 0.0 | 92.0 | 16.8 | 18.3 | 26.6 |
+| short_low | baseline | lmdeploy | 98.9 | 104.3 | 113.4 | 106.5 | - | - | - | - | - |
+| long_high | baseline | vllm | 3749.4 | 3934.2 | 897.1 | 505.2 | 0.0 | 622.8 | 44.1 | 259.9 | 265.2 |
+| long_high | baseline | lmdeploy | 3798.1 | 3572.8 | 676.7 | 239.2 | - | - | - | - | - |
+| long_high | tight | vllm | 8795.6 | 8561.6 | 15968.6 | 15127.0 | 15383.5 | 427.9 | 29.0 | 203.9 | 239.0 |
+| long_high | tight | lmdeploy | 8880.6 | 8434.6 | 16009.1 | 15036.3 | - | - | - | - | - |
+| shared_prefix | baseline | vllm | 1090.0 | 1265.2 | 244.7 | 115.4 | 0.0 | 174.0 | 32.6 | 58.7 | 72.6 |
+| shared_prefix | baseline | lmdeploy | 1076.0 | 1229.5 | 208.8 | 108.1 | - | - | - | - | - |
+| shared_prefix | no_prefix_caching | vllm | 1324.7 | 1392.1 | 480.5 | 170.2 | 0.0 | 322.3 | 32.3 | 157.2 | 238.1 |
+| shared_prefix | no_prefix_caching | lmdeploy | 1393.2 | 1352.7 | 454.8 | 161.5 | - | - | - | - | - |
+| mixed | baseline | vllm | 1066.8 | 1012.6 | 504.9 | 238.2 | 0.0 | 439.7 | 31.4 | 204.9 | 240.8 |
+| mixed | baseline | lmdeploy | 1023.0 | 983.9 | 635.1 | 226.5 | - | - | - | - | - |
+| mixed | no_chunked_prefill | vllm | 1011.8 | 818.5 | 878.3 | 441.3 | 0.0 | 668.6 | 31.5 | 200.2 | 446.8 |
+| mixed | long_prefill_512 | vllm | 1055.3 | 1012.1 | 513.8 | 300.7 | 0.0 | 364.2 | 29.9 | 136.3 | 167.1 |
+| saturation | baseline | vllm | 3092.4 | 3307.0 | 796.8 | 260.2 | 0.0 | 529.3 | 173.1 | 261.1 | 268.4 |
+| saturation | baseline | lmdeploy | 3040.7 | 3086.2 | 739.2 | 249.1 | - | - | - | - | - |
+| saturation | tight | vllm | 22683.1 | 21862.8 | 49865.0 | 47745.9 | 49111.6 | 473.3 | 29.4 | 230.2 | 237.7 |
+| saturation | tight | lmdeploy | 22813.0 | 20091.0 | 50225.2 | 47862.3 | - | - | - | - | - |
+| saturation | tight_no_prefix_caching | vllm | 22874.5 | 22056.9 | 50533.0 | 48542.6 | 49728.7 | 473.8 | 29.4 | 231.1 | 237.5 |
+| saturation | tight_no_prefix_caching | lmdeploy | 22772.3 | 22058.7 | 50153.5 | 48607.3 | - | - | - | - | - |
+| saturation | tight_sim_aligned | vllm | 23511.4 | 21862.8 | 51499.0 | 47763.1 | 50924.7 | 242.1 | 109.0 | 235.5 | 242.8 |
+
+## Time to first token by prompt length
+
+A scenario with several ranges of prompt lengths gives them to its requests in turn. The median TTFT over the requests of each range, measured, and estimated with the engine's fitted cost model.
+
+| Scenario | Cell | Engine | Prompt tokens | TTFT p50 ms, measured | TTFT p50 ms, estimated |
+| --- | --- | --- | --- | --- | --- |
+| mixed | baseline | vllm | 64 to 128 | 502.9 | 239.1 |
+| mixed | baseline | vllm | 1536 to 2048 | 520.4 | 240.3 |
+| mixed | baseline | lmdeploy | 64 to 128 | 636.6 | 226.7 |
+| mixed | baseline | lmdeploy | 1536 to 2048 | 641.8 | 229.6 |
+| mixed | no_chunked_prefill | vllm | 64 to 128 | 737.9 | 442.7 |
+| mixed | no_chunked_prefill | vllm | 1536 to 2048 | 928.4 | 445.8 |
+| mixed | long_prefill_512 | vllm | 64 to 128 | 406.7 | 166.7 |
+| mixed | long_prefill_512 | vllm | 1536 to 2048 | 828.1 | 625.2 |
+
+## Token budget rule, estimated
+
+Each vLLM `baseline` cell replayed twice with vLLM's fitted cost model: with its own rule, one token budget that decode tokens are taken from first, and with TurboMind's, where the budget bounds prefill only and decode tokens come on top, replayed as the budget plus the limit on running requests. The measured columns are the two engines.
+
+| Scenario | TTFT p50 ms, estimated, shared budget | TTFT p50 ms, estimated, prefill-only budget | TTFT p50 ms, measured, vllm | TTFT p50 ms, measured, lmdeploy |
+| --- | --- | --- | --- | --- |
+| short_low | 110.3 | 110.3 | 109.9 | 112.0 |
+| long_high | 515.0 | 258.8 | 1008.2 | 686.7 |
+| shared_prefix | 116.5 | 113.9 | 246.1 | 211.0 |
+| mixed | 239.7 | 240.7 | 514.8 | 638.8 |
+| saturation | 520.0 | 265.3 | 1015.5 | 740.4 |
+
+## Memory pressure, simulated
+
+Replays of the vLLM cells with the small cache under both admission rules, vLLM's default, which admits a request when its whole input fits, and the first chunk only; then `shared_prefix` with vLLM's `baseline` settings and smaller caches, which no engine was measured with on that scenario. Tokens discarded are those in the victims' block tables when they were preempted, computed or taken from the cache; the next column counts the tokens resumed requests took from the cache, and the difference is what the replay computes twice. A cached block is orphaned when an earlier block of its chain is not cached, so that no lookup can reach it; the column is the highest count at any step, free and allocated blocks alike. The hit rate counts first admissions only. The counters do not depend on the cost model; the last two columns are estimated with vLLM's.
+
+| Scenario | Blocks | Prefix caching | Admission | Preemptions | Tokens computed | Tokens discarded | Found cached on resumption | Orphaned blocks | Hit rate | TTFT p50 ms, estimated | Output tokens/s, estimated |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| long_high | 252 | on | whole input | 7 | 387334 | 13108 | 9728 | 0 | 0.000 | 15109.8 | 205.8 |
+| long_high | 252 | on | first chunk | 35 | 390469 | 27059 | 20544 | 0 | 0.000 | 15140.5 | 205.3 |
+| shared_prefix | 252 | on | whole input | 0 | 89830 | 0 | 0 | 0 | 0.816 | 116.5 | 507.0 |
+| shared_prefix | 192 | on | whole input | 100 | 108124 | 127926 | 109632 | 0 | 0.816 | 253.0 | 432.1 |
+| shared_prefix | 160 | on | whole input | 60 | 122838 | 73456 | 53248 | 0 | 0.775 | 3795.3 | 256.0 |
+| shared_prefix | 144 | on | whole input | 45 | 321474 | 56540 | 47616 | 0 | 0.100 | 5044.0 | 203.0 |
+| shared_prefix | 128 | on | whole input | 18 | 344584 | 23266 | 22464 | 0 | 0.000 | 7717.6 | 186.3 |
+| saturation | 252 | on | whole input | 75 | 352556 | 90796 | 32960 | 0 | 0.000 | 47676.9 | 371.4 |
+| saturation | 252 | on | first chunk | 79 | 353332 | 91572 | 32960 | 0 | 0.000 | 47676.9 | 371.3 |
+| saturation | 252 | off | whole input | 76 | 385110 | 90390 | 0 | 0 | - | 48456.6 | 366.3 |
+| saturation | 252 | off | first chunk | 86 | 393803 | 99083 | 0 | 0 | - | 48604.9 | 365.0 |
 
 ## LMDeploy cache usage, measured
 
