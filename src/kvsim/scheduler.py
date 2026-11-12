@@ -16,6 +16,7 @@ class SchedulerConfig:
     enable_chunked_prefill: bool = True
     long_prefill_token_threshold: int = 0
     enable_prefix_caching: bool = True
+    enable_full_input_admission: bool = False
     eos_token_id: int = 0
 
     def __post_init__(self) -> None:
@@ -148,6 +149,13 @@ class Scheduler:
             num_computed_tokens = len(computed_blocks) * self.config.block_size
             num_new_tokens = request.num_tokens - num_computed_tokens
             if not self.config.enable_chunked_prefill and num_new_tokens > token_budget:
+                break
+            if (
+                self.config.enable_full_input_admission
+                and not self.kv_cache_manager.can_allocate_slots(
+                    request, num_new_tokens, computed_blocks
+                )
+            ):
                 break
             num_new_tokens = min(num_new_tokens, max_tokens_per_request, token_budget)
             new_blocks = self.kv_cache_manager.allocate_slots(

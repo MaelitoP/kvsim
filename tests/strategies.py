@@ -53,5 +53,6 @@ def configs(draw: st.DrawFn, max_computed_tokens: int) -> SchedulerConfig:
         enable_chunked_prefill=enable_chunked_prefill,
         long_prefill_token_threshold=long_prefill_token_threshold,
         enable_prefix_caching=draw(st.booleans()),
+        enable_full_input_admission=draw(st.booleans()),
         eos_token_id=EOS,
     )

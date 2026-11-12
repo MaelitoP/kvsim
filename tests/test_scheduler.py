@@ -35,6 +35,7 @@ def make_scheduler(
     enable_chunked_prefill: bool = True,
     long_prefill_token_threshold: int = 0,
     enable_prefix_caching: bool = False,
+    enable_full_input_admission: bool = False,
 ) -> Scheduler:
     return checked_scheduler(
         SchedulerConfig(
@@ -45,6 +46,7 @@ def make_scheduler(
             enable_chunked_prefill=enable_chunked_prefill,
             long_prefill_token_threshold=long_prefill_token_threshold,
             enable_prefix_caching=enable_prefix_caching,
+            enable_full_input_admission=enable_full_input_admission,
             eos_token_id=EOS,
         )
     )
@@ -279,25 +281,55 @@ def test_the_youngest_running_request_is_preempted_first_and_resumes_at_the_queu
     assert batches[-1].scheduled_new == ("late",)
 
 
-def test_a_request_in_partial_prefill_can_be_preempted_and_restarts_from_zero() -> None:
-    scheduler = make_scheduler(num_blocks=4, max_tokens_per_step=4)
+@pytest.mark.parametrize(
+    ("enable_full_input_admission", "scheduled", "resumed", "first_scheduled_step"),
+    [
+        (
+            False,
+            [
+                ([("held", 1), ("long", 3)], ()),
+                ([("held", 1), ("long", 3)], ()),
+                ([("held", 1)], ("long",)),
+                ([("long", 4)], ()),
+            ],
+            ("long",),
+            1,
+        ),
+        (
+            True,
+            [
+                ([("held", 1)], ()),
+                ([("held", 1)], ()),
+                ([("held", 1)], ()),
+                ([("long", 4)], ()),
+            ],
+            (),
+            4,
+        ),
+    ],
+)
+def test_a_long_prompt_is_preempted_in_partial_prefill_or_waits_for_its_whole_input(
+    enable_full_input_admission: bool,
+    scheduled: list[tuple[list[tuple[str, int]], tuple[str, ...]]],
+    resumed: tuple[str, ...],
+    first_scheduled_step: int,
+) -> None:
+    scheduler = make_scheduler(
+        num_blocks=4,
+        max_tokens_per_step=4,
+        enable_full_input_admission=enable_full_input_admission,
+    )
     scheduler.add_request(make_request("held", num_prompt_tokens=4))
     run_step(scheduler)
     long = make_request("long", num_prompt_tokens=16, max_output_tokens=1)
     scheduler.add_request(long)
     batches = [run_step(scheduler)[0] for _ in range(7)]
     assert [(list(batch.num_scheduled_tokens.items()), batch.preempted) for batch in batches] == [
-        ([("held", 1), ("long", 3)], ()),
-        ([("held", 1), ("long", 3)], ()),
-        ([("held", 1)], ("long",)),
-        ([("long", 4)], ()),
-        ([("long", 4)], ()),
-        ([("long", 4)], ()),
-        ([("long", 4)], ()),
+        *scheduled,
+        *[([("long", 4)], ())] * 3,
     ]
-    assert batches[3].scheduled_resumed == ("long",)
-    assert long.num_preemptions == 1
-    assert long.first_scheduled_step == 1
+    assert batches[3].scheduled_resumed == resumed
+    assert long.first_scheduled_step == first_scheduled_step
     assert long.first_token_step == long.finished_step == 7
 
 

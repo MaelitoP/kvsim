@@ -45,6 +45,8 @@ def manager_state(manager: KVCacheManager) -> ManagerState:
 
 
 class CheckedKVCacheManager(KVCacheManager):
+    enable_full_input_admission = False
+
     @override
     def allocate_slots(
         self,
@@ -53,18 +55,28 @@ class CheckedKVCacheManager(KVCacheManager):
         new_computed_blocks: Sequence[KVCacheBlock] = (),
     ) -> list[KVCacheBlock] | None:
         before = manager_state(self)
+        is_admission = self.num_blocks_for(request) == 0
+        whole_input_fits = self.can_allocate_slots(
+            request,
+            request.num_tokens - len(new_computed_blocks) * self.block_size,
+            new_computed_blocks,
+        )
         new_blocks = super().allocate_slots(request, num_new_tokens, new_computed_blocks)
         if new_blocks is None:
             assert manager_state(self) == before
+        elif self.enable_full_input_admission and is_admission:
+            assert whole_input_fits
         return new_blocks
 
 
 def checked_scheduler(config: SchedulerConfig) -> Scheduler:
     scheduler = Scheduler(config)
     manager = scheduler.kv_cache_manager
-    scheduler.kv_cache_manager = CheckedKVCacheManager(
+    checked_manager = CheckedKVCacheManager(
         manager.num_blocks, manager.block_size, enable_caching=manager.enable_caching
     )
+    checked_manager.enable_full_input_admission = config.enable_full_input_admission
+    scheduler.kv_cache_manager = checked_manager
     return scheduler
 
 

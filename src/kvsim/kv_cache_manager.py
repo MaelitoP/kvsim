@@ -43,24 +43,24 @@ class KVCacheManager:
             computed_blocks.append(block)
         return computed_blocks
 
+    def can_allocate_slots(
+        self,
+        request: Request,
+        num_new_tokens: int,
+        new_computed_blocks: Sequence[KVCacheBlock] = (),
+    ) -> bool:
+        return self._fit(request, num_new_tokens, new_computed_blocks) is not None
+
     def allocate_slots(
         self,
         request: Request,
         num_new_tokens: int,
         new_computed_blocks: Sequence[KVCacheBlock] = (),
     ) -> list[KVCacheBlock] | None:
-        num_reserved_tokens = (
-            request.num_computed_tokens
-            + len(new_computed_blocks) * self.block_size
-            + num_new_tokens
-        )
-        num_required_blocks = -(-num_reserved_tokens // self.block_size)
-        num_new_blocks = (
-            num_required_blocks - self.num_blocks_for(request) - len(new_computed_blocks)
-        )
-        num_free_hits = sum(block.ref_count == 0 for block in new_computed_blocks)
-        if num_new_blocks + num_free_hits > self.num_free_blocks:
+        fit = self._fit(request, num_new_tokens, new_computed_blocks)
+        if fit is None:
             return None
+        num_reserved_tokens, num_new_blocks = fit
         self.block_pool.retain(new_computed_blocks)
         new_blocks = self.block_pool.allocate(num_new_blocks)
         blocks = self._blocks_by_request.setdefault(request.request_id, [])
@@ -78,6 +78,23 @@ class KVCacheManager:
             )
             self._num_cached_blocks[request.request_id] = num_full_blocks
         return new_blocks
+
+    def _fit(
+        self, request: Request, num_new_tokens: int, new_computed_blocks: Sequence[KVCacheBlock]
+    ) -> tuple[int, int] | None:
+        num_reserved_tokens = (
+            request.num_computed_tokens
+            + len(new_computed_blocks) * self.block_size
+            + num_new_tokens
+        )
+        num_required_blocks = -(-num_reserved_tokens // self.block_size)
+        num_new_blocks = (
+            num_required_blocks - self.num_blocks_for(request) - len(new_computed_blocks)
+        )
+        num_free_hits = sum(block.ref_count == 0 for block in new_computed_blocks)
+        if num_new_blocks + num_free_hits > self.num_free_blocks:
+            return None
+        return num_reserved_tokens, num_new_blocks
 
     def free(self, request: Request) -> None:
         blocks = self._blocks_by_request.pop(request.request_id, [])
