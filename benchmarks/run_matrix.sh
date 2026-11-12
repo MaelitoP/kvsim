@@ -135,15 +135,19 @@ write_readme() {
     driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | sed -n 1p)
     cuda=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9.]*\).*/\1/p')
     cat > "$results_dir/README.txt" << EOF
-Measurements of $engine $ENGINE_VERSION written by benchmarks/run_matrix.sh, last run on $(date -u +%F) (UTC).
+Benchmark results: $engine $ENGINE_VERSION.
+Run metadata written by benchmarks/run_matrix.sh on $(date -u +%F) (UTC).
 
-Every time in these files is measured: wall-clock seconds read by benchmarks/client.py. One file per run, named scenario.cell.run. The engine was restarted before every run, and its log is next to each result.
+Each <scenario>.<cell>.run<N>.json contains one measured run, with a matching .log file.
+Each run starts a fresh engine and warms it up with different prompts.
+benchmarks/client.py records times in seconds and scrapes metrics once per second.
 
 GPU: $gpu, driver $driver, CUDA $cuda.
 Image: $ENGINE_IMAGE.
-Model: $MODEL at revision $MODEL_REVISION, bfloat16. Prompts were built with the tokenizer.json of that revision.
-KV cache: blocks of $BLOCK_SIZE tokens, $KV_BYTES_PER_TOKEN bytes per token; $LARGE_NUM_BLOCKS blocks in the large budget and $TIGHT_NUM_BLOCKS in the tight one, read back from the engine log before every run.
-Engine metrics were scraped every second.
+Model: $MODEL at revision $MODEL_REVISION, bfloat16.
+Tokenizer: tokenizer.json from the same model revision.
+KV cache: $BLOCK_SIZE tokens per block, $KV_BYTES_PER_TOKEN bytes per token.
+Usable blocks: $LARGE_NUM_BLOCKS (large), $TIGHT_NUM_BLOCKS (tight), checked against each engine log.
 EOF
 }
 
